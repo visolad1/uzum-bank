@@ -34,9 +34,13 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-    /* ── Root & global ── */
+    /* ── Root & global text ── */
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #f0f2f5; }
+
+    /* Main content text — dark on white */
+    .main p, .main li, .main span, .main label,
+    .main div, .main td, .main th { color: #1f2026; }
 
     /* ── Main content area ── */
     .main .block-container {
@@ -74,41 +78,28 @@ st.markdown("""
     }
     [data-testid="stSidebar"] .stRadio label:hover { background: rgba(127,77,255,0.15) !important; color: #ffffff !important; }
 
-    /* ── KPI cards ── */
-    .kpi-card {
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 18px 20px;
-        border-left: 4px solid #7000ff;
-        box-shadow: 0 2px 8px rgba(112,0,255,0.10);
-        margin-bottom: 8px;
-    }
-    .kpi-label { font-size: 0.78rem; font-weight: 500; color: #8b8e99; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-    .kpi-value { font-size: 1.9rem; font-weight: 700; color: #1f2026; line-height: 1; }
-    .kpi-sub   { font-size: 0.82rem; color: #7f4dff; font-weight: 500; margin-top: 4px; }
-
     /* ── Risk labels ── */
     .risk-CRITICAL { color: #cc0000; font-weight: 700; }
     .risk-HIGH     { color: #e56f00; font-weight: 700; }
     .risk-MEDIUM   { color: #cc7700; font-weight: 700; }
     .risk-LOW      { color: #008a32; font-weight: 700; }
 
-    /* ── Streamlit native metric widget (non-KPI pages) ── */
+    /* ── Streamlit native metric widget ── */
     [data-testid="metric-container"] {
-        background: #fafafa;
-        border-radius: 10px;
-        padding: 14px 18px;
-        border-left: 4px solid #7f4dff;
-        box-shadow: 0 1px 4px rgba(127,77,255,0.08);
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 16px 18px;
+        border-left: 4px solid #7000ff;
+        box-shadow: 0 2px 10px rgba(112,0,255,0.08);
     }
-    [data-testid="stMetricLabel"]  { color: #8b8e99 !important; font-size: 0.8rem !important; }
-    [data-testid="stMetricValue"]  { color: #1f2026 !important; font-weight: 700; }
-    [data-testid="stMetricDelta"]  { color: #7f4dff !important; }
+    [data-testid="stMetricLabel"]  { color: #595b66 !important; font-size: 0.72rem !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: 0.05em !important; }
+    [data-testid="stMetricValue"]  { color: #1f2026 !important; font-weight: 700 !important; font-size: 1.6rem !important; }
+    [data-testid="stMetricDelta"]  { color: #5300b2 !important; font-size: 0.8rem !important; }
 
     /* ── Headings ── */
     h1 { color: #1f2026 !important; font-weight: 700 !important; letter-spacing: -0.02em; }
     h2, h3 { color: #2a2b33 !important; font-weight: 600 !important; }
-    .stCaption, caption { color: #8b8e99 !important; }
+    .stCaption, caption { color: #595b66 !important; }
 
     /* ── Buttons ── */
     .stDownloadButton > button, .stButton > button {
@@ -125,7 +116,7 @@ st.markdown("""
     }
 
     /* ── Tabs ── */
-    .stTabs [data-baseweb="tab"] { font-size: 0.95rem; padding: 8px 18px; color: #8b8e99; font-weight: 500; }
+    .stTabs [data-baseweb="tab"] { font-size: 0.95rem; padding: 8px 18px; color: #41434d; font-weight: 500; }
     .stTabs [aria-selected="true"] { color: #7000ff !important; border-bottom: 3px solid #7000ff !important; font-weight: 600 !important; }
 
     /* ── Divider ── */
@@ -134,16 +125,46 @@ st.markdown("""
     /* ── Expander ── */
     details summary { color: #7000ff !important; font-weight: 600; }
     details { border: 1px solid #edeff2 !important; border-radius: 10px !important; background: #fafafa !important; }
+    details p, details div, details span, details label { color: #1f2026 !important; }
 
-    /* ── Selectbox / multiselect ── */
-    [data-testid="stMultiSelect"] span[aria-selected="true"] { background-color: #7f4dff !important; }
-    [data-baseweb="select"] { border-radius: 8px !important; }
+    /* ── Selectbox / multiselect — visible on white background ── */
+    [data-testid="stSelectbox"] label,
+    [data-testid="stMultiSelect"] label,
+    [data-testid="stSelectbox"] span,
+    [data-testid="stMultiSelect"] span,
+    [data-testid="stSelectbox"] div,
+    [data-testid="stMultiSelect"] div { color: #1f2026 !important; }
+
+    /* Dropdown option list */
+    [data-baseweb="popover"] li,
+    [data-baseweb="popover"] span,
+    [data-baseweb="popover"] [role="option"] { color: #1f2026 !important; background: #ffffff; }
+    [data-baseweb="popover"] [role="option"]:hover { background: #f0f2f5 !important; }
+    [data-baseweb="popover"] [aria-selected="true"] { background: #7f4dff !important; color: #ffffff !important; }
+
+    /* Selectbox trigger input */
+    [data-baseweb="select"] div,
+    [data-baseweb="select"] span { color: #1f2026 !important; }
+    [data-baseweb="select"] { border-radius: 8px !important; border-color: #dee0e5 !important; }
+
+    /* Multiselect tags */
+    [data-testid="stMultiSelect"] span[aria-selected="true"] { background-color: #7f4dff !important; color: #ffffff !important; }
+
+    /* ── Slider ── */
+    [data-testid="stSlider"] label { color: #1f2026 !important; }
+    [data-testid="stSlider"] [role="slider"] { background: #7000ff !important; }
+    [data-testid="stSlider"] [data-testid="stTickBarMin"],
+    [data-testid="stSlider"] [data-testid="stTickBarMax"] { color: #595b66 !important; }
 
     /* ── Dataframe ── */
     [data-testid="stDataFrame"] { border-radius: 10px !important; overflow: hidden; }
 
-    /* ── Slider accent ── */
-    [data-testid="stSlider"] [role="slider"] { background: #7000ff !important; }
+    /* ── Radio / checkbox labels ── */
+    .main .stRadio label, .main .stCheckbox label { color: #1f2026 !important; }
+
+    /* ── General input labels ── */
+    .main [data-testid*="stText"] label,
+    .main [class*="stLabel"] { color: #1f2026 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -223,33 +244,27 @@ if page == "Обзор":
     st.title("Аналитика оттока карт")
     st.caption("Дашборд по предсказанию 'засыпания' дебетовых карт · Uzum Bank")
 
-    # ── KPI row (HTML cards — no truncation) ────────────────────────────────
-    def kpi(label, value, sub=""):
-        sub_html = f'<div class="kpi-sub">{sub}</div>' if sub else ""
-        return f"""<div class="kpi-card">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-value">{value}</div>
-            {sub_html}
-        </div>"""
+    # ── Pre-compute KPI values ──────────────────────────────────────────────
+    total_cards = diag['total_cards'] if diag else 0
+    ever        = diag['ever_txn_cards'] if diag else 0
+    rate        = diag['ever_txn_rate_pct'] if diag else 0
+    active_n    = int(diag['total_cards'] * diag['is_active_target_pct'] / 100) if diag else 0
+    pct         = diag['is_active_target_pct'] if diag else 0
+    churned     = diag['churned_cards'] if diag else 0
+    auc         = metrics['auc_roc'] if metrics else 0
 
+    # ── KPI row ────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        total_cards = diag['total_cards'] if diag else 0
-        st.markdown(kpi("Карт всего", f"{total_cards:,}"), unsafe_allow_html=True)
+        st.metric("Карт всего", f"{total_cards:,}")
     with k2:
-        ever = diag['ever_txn_cards'] if diag else 0
-        rate = diag['ever_txn_rate_pct'] if diag else 0
-        st.markdown(kpi("Платили хоть раз", f"{ever:,}", f"↑ {rate:.1f}% от всех"), unsafe_allow_html=True)
+        st.metric("Платили хоть раз", f"{ever:,}", delta=f"{rate:.1f}%")
     with k3:
-        active_n = int(diag['total_cards'] * diag['is_active_target_pct'] / 100) if diag else 0
-        pct = diag['is_active_target_pct'] if diag else 0
-        st.markdown(kpi("Активных (is_active=1)", f"{active_n:,}", f"{pct:.1f}%"), unsafe_allow_html=True)
+        st.metric("Активных карт", f"{active_n:,}", delta=f"{pct:.1f}%")
     with k4:
-        churned = diag['churned_cards'] if diag else 0
-        st.markdown(kpi("Засыпающих (churn)", f"{churned:,}"), unsafe_allow_html=True)
+        st.metric("Засыпающих", f"{churned:,}")
     with k5:
-        auc = metrics['auc_roc'] if metrics else 0
-        st.markdown(kpi("AUC-ROC модели", f"{auc:.3f}", "Decision Tree"), unsafe_allow_html=True)
+        st.metric("AUC-ROC", f"{auc:.3f}")
 
     st.divider()
 
@@ -279,7 +294,7 @@ if page == "Обзор":
                 paper_bgcolor="rgba(0,0,0,0)",
                 xaxis=dict(showgrid=True, gridcolor="#dee0e5"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig)
 
     # ── Risk distribution ────────────────────────────────────────────────────
     with col_right:
@@ -306,7 +321,7 @@ if page == "Обзор":
                 showlegend=False,
                 paper_bgcolor="rgba(0,0,0,0)",
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig)
 
     # ── Churn proba distribution ──────────────────────────────────────────────
     st.subheader("Распределение вероятности оттока")
@@ -323,7 +338,7 @@ if page == "Обзор":
             height=260, margin=dict(l=0, r=0, t=20, b=0),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
 
 # ===========================================================================
@@ -382,7 +397,7 @@ elif page == "Модель":
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             xaxis=dict(range=[0, fi["importance"].max() * 1.25]),
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
     # ── Threshold обоснование ────────────────────────────────────────────────
     with col2:
@@ -427,7 +442,7 @@ elif page == "Модель":
             legend=dict(orientation="h", y=1.15),
             xaxis_title="Порог", yaxis_title="Метрика",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
     # ── Confusion matrix ──────────────────────────────────────────────────────
     st.subheader("Матрица ошибок (test set)")
@@ -448,7 +463,7 @@ elif page == "Модель":
     )
     fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
                       paper_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig)
 
 
 # ===========================================================================
@@ -511,7 +526,7 @@ elif page == "Скоринг карт":
                   annotation_text="Порог", annotation_position="right")
     fig.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0),
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig)
 
     # ── Table ────────────────────────────────────────────────────────────────
     st.subheader("Таблица карт")
@@ -540,7 +555,7 @@ elif page == "Скоринг карт":
         display_df.style
             .map(_style_risk, subset=["Риск"])
             .format({"P(churn)": "{:.3f}"}),
-        use_container_width=True, height=420,
+        height=420,
     )
 
     # Download
@@ -563,7 +578,7 @@ elif page == "Бонусы":
         if scored is not None:
             st.subheader("Предпросмотр: карты HIGH/CRITICAL риска")
             preview = scored[scored["risk_level"].isin(["CRITICAL", "HIGH"])].head(10)
-            st.dataframe(preview, width="stretch")
+            st.dataframe(preview, )
         st.stop()
 
     # ── KPIs ─────────────────────────────────────────────────────────────────
@@ -587,7 +602,7 @@ elif page == "Бонусы":
         fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
                           plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                           yaxis=dict(categoryorder="total ascending"))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
     # ── Каналы отправки ───────────────────────────────────────────────────────
     with col2:
@@ -606,7 +621,7 @@ elif page == "Бонусы":
         fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
                           plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                           legend=dict(title="Канал"))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig)
 
     # ── Sample messages ───────────────────────────────────────────────────────
     st.subheader("Примеры персонализированных сообщений")
@@ -631,7 +646,7 @@ elif page == "Бонусы":
         bonus.sort_values("churn_proba", ascending=False)
              [["card_id", "kiosk_name", "churn_proba", "risk_level",
                "top_category", "bonus_sums", "send_day", "channel", "message"]],
-        use_container_width=True, height=350,
+        height=350,
     )
     st.download_button(
         "Скачать список бонусов (CSV)",
@@ -682,7 +697,7 @@ elif page == "Регионы":
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         coloraxis_showscale=False,
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig)
 
     # ── Bubble: n_cards vs avg_churn_proba ───────────────────────────────────
     st.subheader("Карты vs риск оттока по регионам")
@@ -705,7 +720,7 @@ elif page == "Регионы":
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         coloraxis_colorbar=dict(tickfont=dict(color="#4d4f59")),
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig)
 
     # ── Table ────────────────────────────────────────────────────────────────
     st.subheader("Детальная таблица по регионам")
@@ -725,4 +740,4 @@ elif page == "Регионы":
         "% под риском": "{:.1f}%",
         "Ср. транзакций м.0": "{:.2f}",
     }).background_gradient(subset=["Ср. P(churn)"], cmap="Purples")
-    st.dataframe(_region_styled, width="stretch", height=420)
+    st.dataframe(_region_styled, height=420)
