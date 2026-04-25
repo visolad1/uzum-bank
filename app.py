@@ -392,7 +392,7 @@ elif page == "Скоринг карт":
     def _style_risk(val):
         colors_map = {"CRITICAL": "#fff5f5", "HIGH": "#fff8f0",
                       "MEDIUM": "#fffdf0", "LOW": "#f5fbf6"}
-        return f"background-color: {colors_map.get(val, '')}"
+        return f"color: {colors_map.get(val, '')}"
 
     display_df = (
         filtered[["card_id", "kiosk_name", "churn_proba", "risk_level",
@@ -409,12 +409,7 @@ elif page == "Скоринг карт":
             "activated_m0": "Активирован м.0",
         })
     )
-    st.dataframe(
-        display_df.style
-            .map(_style_risk, subset=["Риск"])
-            .format({"P(churn)": "{:.3f}"}),
-        height=420,
-    )
+    st.dataframe(display_df.style.applymap(_style_risk, subset=["Риск"]), height=400)
 
     # Download
     csv_bytes = filtered.to_csv(index=False).encode("utf-8")
