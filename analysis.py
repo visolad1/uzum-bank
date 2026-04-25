@@ -15,6 +15,7 @@ import numpy as np
 import json
 import argparse
 from pathlib import Path
+from data_loader import load_data
 
 try:
     import matplotlib
@@ -30,25 +31,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Data loading and preparation
 # ---------------------------------------------------------------------------
-
-def load_data(data_path):
-    """Load CSV and derive month_of_life for each row."""
-    path = Path(data_path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {data_path}")
-
-    print(f"Loading data from {data_path}...")
-    df = pd.read_csv(data_path)
-
-    df['month'] = pd.to_datetime(df['month'])
-    df['card_creation_date'] = pd.to_datetime(df['card_creation_date'])
-
-    # month_of_life: 0 = issuance month, 1 = next month, etc.
-    creation_period = df['card_creation_date'].dt.to_period('M')
-    month_period = df['month'].dt.to_period('M')
-    df['month_of_life'] = (month_period - creation_period).apply(lambda x: x.n)
-
-    return df
 
 
 def build_card_monthly(df):
@@ -387,7 +369,9 @@ def main():
     print("\nUZUM BANK: Debit Card Activity Diagnostics")
     print("=" * 70)
 
-    df = load_data(args.data_path)
+    df = load_data(args.data_path, fallback_path='data/uzum_hackathon_dataset.csv')
+    if df is None:
+        return
     print(f"\nRows loaded:    {len(df):,}")
     print(f"Unique cards:   {df['card_id'].nunique():,}")
     print(f"Period:         {df['month'].min().strftime('%Y-%m')} - {df['month'].max().strftime('%Y-%m')}")

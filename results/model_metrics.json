@@ -1,0 +1,21 @@
+{
+  "auc_roc": 0.8635,
+  "threshold": 0.469,
+  "precision": 0.7195,
+  "recall": 0.9456,
+  "f1": 0.8172,
+  "total_cards": 17467,
+  "churn_rate": 0.5,
+  "predicted_churn_cards": 11424,
+  "feature_importance": {
+    "cnt_m0": 0.7526,
+    "activated_m0": 0.1431,
+    "creation_day": 0.0745,
+    "amt_m0": 0.0251,
+    "online_share": 0.0047,
+    "n_cats_m0": 0.0,
+    "offline_share": 0.0,
+    "transfer_share": 0.0,
+    "cash_share": 0.0
+  }
+}

@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """
-Декишн три модель для предсказания оттока клиентов.
+Decision Tree model predicting card dormancy (churn).
 
-Модель анализирует поведение в первые 7-14 дней и предсказывает
-вероятность того, что клиент перестанет пользоваться картой в следующие 30 дней.
+Dataset has monthly granularity. month_of_life=0 (first calendar month
+of card life) is used as the proxy for 'first 7-14 days' behavior.
+
+Features  : activation speed, transaction volume, category diversity,
+            payment channel mix — all from month_of_life=0.
+Target    : churn = 1 - is_active  (static label per card).
+Output    : churn probability per card + results/scored_cards.csv
+            for downstream bonus_logic.py.
 """
 
 import pandas as pd
 import numpy as np
-from datetime import timedelta
-from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
-    confusion_matrix, classification_report, roc_auc_score, roc_curve,
-    precision_recall_curve, f1_score
+    confusion_matrix, roc_auc_score, precision_recall_curve, f1_score
 )
 import json
 from pathlib import Path
 import argparse
+from data_loader import load_data
 
 try:
     import matplotlib.pyplot as plt
@@ -26,287 +31,311 @@ except ImportError:
     PLOT_AVAILABLE = False
 
 
-def load_data(data_path=None):
-    """Загружает данные для обучения модели."""
-    if data_path and Path(data_path).exists():
-        print(f"📂 Загружаю данные из {data_path}...")
-        df = pd.read_csv(data_path)
-    else:
-        # Использую sample_data если он существует
-        if Path('data/sample_data.csv').exists():
-            print(f"📂 Загружаю данные из data/sample_data.csv...")
-            df = pd.read_csv('data/sample_data.csv')
-        else:
-            print("❌ Данные не найдены!")
-            return None
-    
-    # Конвертируем даты
-    for col in ['issue_date', 'first_transaction_date', 'transaction_date']:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
-    
-    return df
+# ---------------------------------------------------------------------------
+# Category constants (actual names from dataset)
+# ---------------------------------------------------------------------------
 
+CAT_ONLINE        = 'Онлайн оплаты'
+CAT_OFFLINE       = 'Оффлайн оплаты'
+CAT_TRANSFER_IN   = 'Перевод внутри страны - пополнение'
+CAT_TRANSFER_OUT  = 'Перевод внутри страны - списание'
+CAT_ATM_CAPITAL   = 'Пополнение через АТМ - Kапитал Банк'
+CAT_ATM_CASH_CAP  = 'Снятие наличных в АТМ - Kапитал Банк'
+CAT_ATM_CASH_OTH  = 'Снятие наличных в АТМ - Другие банки'
+CAT_NASIYA        = 'Кэш кредит Nasiya - пополнение'
+CAT_RETURNS       = 'Возвраты/отмены - Оплаты'
+CAT_CROSS_BORDER  = 'Трансгран - пополнение'
+CAT_OTHER         = 'Остальное'
+
+ALL_CATEGORIES = [
+    CAT_ONLINE, CAT_OFFLINE, CAT_TRANSFER_IN, CAT_TRANSFER_OUT,
+    CAT_ATM_CAPITAL, CAT_ATM_CASH_CAP, CAT_ATM_CASH_OTH,
+    CAT_NASIYA, CAT_RETURNS, CAT_CROSS_BORDER, CAT_OTHER,
+]
+
+# Features used for training
+FEATURE_COLS = [
+    'creation_day',       # day of month card was created (proxy: days available in month 0)
+    'activated_m0',       # 1 if any transaction in month 0
+    'cnt_m0',             # total transaction count in month 0
+    'amt_m0',             # total amount in month 0
+    'n_cats_m0',          # distinct categories used in month 0
+    'online_share',       # share of cnt: online payments
+    'offline_share',      # share of cnt: offline/POS payments
+    'transfer_share',     # share of cnt: transfers (in + out)
+    'cash_share',         # share of cnt: cash withdrawals
+]
+
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
 
 def extract_features(df):
     """
-    Извлекает признаки для модели по первым 7-14 дням жизни карты.
-    
-    Признаки:
-    - days_to_activation: дни до первой транзакции
-    - txn_count_week1: число транзакций в первую неделю
-    - category_count_week1: число уникальных категорий в неделю
-    - channel_count_week1: число разных каналов в неделю
-    - has_cash_withdrawal: был ли снят наличка
-    - is_transfer_only: только переводы
-    - pos_ratio: доля POS транзакций
-    - online_ratio: доля Online
-    - inapp_ratio: доля In-app
-    """
-    
-    df_active = df[df['first_transaction_date'].notna()].copy()
-    
-    features_list = []
-    
-    for card_id in df_active['card_id'].unique():
-        card_df = df_active[df_active['card_id'] == card_id].sort_values('transaction_date')
-        
-        # Базовая информация
-        issue_date = card_df['issue_date'].iloc[0]
-        first_txn_date = card_df['first_transaction_date'].iloc[0]
-        days_to_activation = (first_txn_date - issue_date).days
-        
-        # Целевая переменная (активна ли на день 30)
-        target = card_df['active_day30'].iloc[0]
-        
-        # Конец первой недели
-        week1_end = first_txn_date + timedelta(days=7)
-        week1_txns = card_df[card_df['transaction_date'] <= week1_end]
-        
-        txn_count_week1 = len(week1_txns)
-        category_count_week1 = week1_txns['mcc_category'].nunique()
-        channel_count_week1 = week1_txns['channel'].nunique()
-        
-        # Распределение по каналам
-        total_week1 = len(week1_txns)
-        channel_counts = week1_txns['channel'].value_counts()
-        pos_ratio = channel_counts.get('POS', 0) / total_week1 if total_week1 > 0 else 0
-        online_ratio = channel_counts.get('Online', 0) / total_week1 if total_week1 > 0 else 0
-        inapp_ratio = channel_counts.get('In-app', 0) / total_week1 if total_week1 > 0 else 0
-        
-        # Специальное поведение
-        has_cash_withdrawal = card_df['is_cash_withdrawal'].iloc[0]
-        is_transfer_only = card_df['is_transfer_only'].iloc[0]
-        
-        features_list.append({
-            'card_id': card_id,
-            'days_to_activation': days_to_activation,
-            'txn_count_week1': txn_count_week1,
-            'category_count_week1': category_count_week1,
-            'channel_count_week1': channel_count_week1,
-            'pos_ratio': pos_ratio,
-            'online_ratio': online_ratio,
-            'inapp_ratio': inapp_ratio,
-            'has_cash_withdrawal': has_cash_withdrawal,
-            'is_transfer_only': is_transfer_only,
-            'churn_day30': 1 - target  # 1 = ушёл, 0 = остался
-        })
-    
-    return pd.DataFrame(features_list)
+    Build one row per card from month_of_life=0 data.
 
+    month_of_life=0 is the first calendar month after card creation —
+    the closest monthly proxy to 'first 7-14 days' available in the data.
+    Cards created late in the month have fewer effective days in month 0
+    (captured via creation_day feature).
+
+    Target: churn = 1 - is_active.
+    """
+    m0 = df[df['month_of_life'] == 0].copy()
+
+    # Pivot category transaction counts for month 0
+    cat_pivot = m0.pivot_table(
+        index='card_id', columns='category', values='cnt',
+        aggfunc='sum', fill_value=0,
+    )
+    for cat in ALL_CATEGORIES:          # ensure all columns exist
+        if cat not in cat_pivot.columns:
+            cat_pivot[cat] = 0
+
+    # Card-level totals in month 0
+    totals_m0 = m0.groupby('card_id').agg(
+        cnt_m0=('cnt', 'sum'),
+        amt_m0=('amt', 'sum'),
+        n_cats_m0=('cnt', lambda x: (x > 0).sum()),
+    )
+
+    # Card metadata (from full df — every card has month 0 rows)
+    meta = df.groupby('card_id').agg(
+        creation_day=('card_creation_date', lambda x: x.iloc[0].day),
+        kiosk_name=('kiosk_name', 'first'),
+        is_active=('is_active', 'max'),
+    )
+
+    features = (
+        meta
+        .join(totals_m0, how='left')
+        .join(cat_pivot,  how='left')
+        .fillna(0)
+    )
+
+    # Channel-share features (safe division: clip denominator at 1)
+    safe_cnt = features['cnt_m0'].clip(lower=1)
+
+    features['activated_m0']   = (features['cnt_m0'] > 0).astype(int)
+    features['online_share']   = features[CAT_ONLINE] / safe_cnt
+    features['offline_share']  = features[CAT_OFFLINE] / safe_cnt
+    features['transfer_share'] = (
+        features[CAT_TRANSFER_IN] + features[CAT_TRANSFER_OUT]
+    ) / safe_cnt
+    features['cash_share'] = (
+        features[CAT_ATM_CASH_CAP] + features[CAT_ATM_CASH_OTH]
+    ) / safe_cnt
+
+    features['churn'] = 1 - features['is_active']
+
+    return features.reset_index()
+
+
+# ---------------------------------------------------------------------------
+# Threshold selection
+# ---------------------------------------------------------------------------
+
+def select_threshold(y_test, y_proba):
+    """
+    Pick classification threshold via Precision-Recall curve analysis.
+
+    Rationale
+    ---------
+    In churn prevention the cost of a False Negative (missed churner who
+    receives no bonus and leaves) exceeds the cost of a False Positive
+    (unnecessary bonus sent). We therefore optimize for F1, which gives
+    equal weight to Precision and Recall, and document the tradeoff so
+    the business can shift the threshold toward higher Recall if the
+    per-bonus cost is low.
+    """
+    precisions, recalls, thresholds = precision_recall_curve(y_test, y_proba)
+
+    denom = precisions[:-1] + recalls[:-1]
+    f1_scores = np.where(denom > 0,
+                         2 * precisions[:-1] * recalls[:-1] / denom, 0)
+    best_idx = int(np.argmax(f1_scores))
+    best_t   = float(thresholds[best_idx])
+
+    print(f"\nThreshold selection — Precision / Recall tradeoff:")
+    print(f"   {'Threshold':>10}  {'Precision':>10}  {'Recall':>8}  {'F1':>8}")
+    print(f"   {'-'*45}")
+    for pct in [10, 25, 40, 50, 60, 75, 90]:
+        t   = float(np.percentile(thresholds, pct))
+        idx = min(int(np.searchsorted(thresholds, t)), len(precisions) - 2)
+        p, r = precisions[idx], recalls[idx]
+        f    = 2 * p * r / (p + r) if p + r > 0 else 0
+        mark = '  <-- selected' if abs(t - best_t) < 0.02 else ''
+        print(f"   {t:>10.3f}  {p:>10.3f}  {r:>8.3f}  {f:>8.3f}{mark}")
+
+    print(f"\n   Optimal threshold : {best_t:.3f}")
+    print(f"   At this point     : Precision={precisions[best_idx]:.3f}  "
+          f"Recall={recalls[best_idx]:.3f}  F1={f1_scores[best_idx]:.3f}")
+    print(f"   Note: lower threshold → higher Recall (catches more churners")
+    print(f"         at cost of more false alarms; acceptable when bonus is cheap).")
+
+    return best_t
+
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
 
 def train_model(features_df):
-    """
-    Обучает Decision Tree модель.
-    """
-    print("\n" + "="*70)
-    print("🤖 ОБУЧЕНИЕ МОДЕЛИ")
-    print("="*70)
-    
-    X = features_df[[
-        'days_to_activation',
-        'txn_count_week1',
-        'category_count_week1',
-        'channel_count_week1',
-        'pos_ratio',
-        'online_ratio',
-        'inapp_ratio',
-        'has_cash_withdrawal',
-        'is_transfer_only'
-    ]]
-    
-    y = features_df['churn_day30']
-    
-    # Разделение на train/test
+    """Train Decision Tree, print metrics, return model + test artifacts."""
+    print("\n" + "=" * 70)
+    print("MODEL TRAINING")
+    print("=" * 70)
+
+    X = features_df[FEATURE_COLS]
+    y = features_df['churn']
+
+    print(f"\nTotal cards : {len(features_df):,}")
+    print(f"Churn rate  : {y.mean():.1%}  (churn=1 means is_active=0)")
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    
-    print(f"\n📊 Данные для обучения:")
-    print(f"   Train: {len(X_train)} карт")
-    print(f"   Test: {len(X_test)} карт")
-    print(f"   Доля оттока в train: {y_train.mean():.1%}")
-    print(f"   Доля оттока в test: {y_test.mean():.1%}")
-    
-    # Обучаем Decision Tree
+    print(f"Train : {len(X_train):,}  |  Test : {len(X_test):,}")
+
     dt = DecisionTreeClassifier(
-        max_depth=5,  # Не слишком глубокая для интерпретируемости
-        min_samples_split=20,  # Минимум 20 образцов для разделения
-        min_samples_leaf=10,  # Минимум 10 в листе
-        random_state=42
+        max_depth=5,
+        min_samples_split=20,
+        min_samples_leaf=10,
+        class_weight='balanced',   # corrects for equal 50/50 split, robust to imbalance
+        random_state=42,
     )
-    
     dt.fit(X_train, y_train)
-    
-    # Предсказания
-    y_pred_train = dt.predict(X_train)
-    y_pred_proba_train = dt.predict_proba(X_train)[:, 1]
-    
-    y_pred_test = dt.predict(X_test)
-    y_pred_proba_test = dt.predict_proba(X_test)[:, 1]
-    
-    # Оценка
-    print(f"\n📈 КАЧЕСТВО МОДЕЛИ")
-    print(f"\nНа обучающей выборке (train):")
-    print(f"   Accuracy: {(y_pred_train == y_train).mean():.3f}")
-    print(f"   AUC-ROC: {roc_auc_score(y_train, y_pred_proba_train):.3f}")
-    print(f"   F1-score: {f1_score(y_train, y_pred_train):.3f}")
-    
-    print(f"\nНа тестовой выборке (test):")
-    print(f"   Accuracy: {(y_pred_test == y_test).mean():.3f}")
-    print(f"   AUC-ROC: {roc_auc_score(y_test, y_pred_proba_test):.3f}")
-    print(f"   F1-score: {f1_score(y_test, y_pred_test):.3f}")
-    
-    print(f"\n🎯 Матрица ошибок (test):")
-    cm = confusion_matrix(y_test, y_pred_test)
-    print(f"   True Negatives (правильно определены остались): {cm[0, 0]}")
-    print(f"   False Positives (ложно определены как уходящие): {cm[0, 1]}")
-    print(f"   False Negatives (пропущены уходящие): {cm[1, 0]}")
-    print(f"   True Positives (правильно определены уходящие): {cm[1, 1]}")
-    
-    print(f"\nПточность (Precision): {cm[1, 1] / (cm[1, 1] + cm[0, 1]):.3f}")
-    print(f"Полнота (Recall): {cm[1, 1] / (cm[1, 1] + cm[1, 0]):.3f}")
-    
-    # Важность признаков
-    feature_importance = pd.DataFrame({
-        'feature': X.columns,
-        'importance': dt.feature_importances_
+
+    y_proba_train = dt.predict_proba(X_train)[:, 1]
+    y_proba_test  = dt.predict_proba(X_test)[:, 1]
+
+    auc_train = roc_auc_score(y_train, y_proba_train)
+    auc_test  = roc_auc_score(y_test,  y_proba_test)
+    print(f"\nAUC-ROC : train={auc_train:.3f}  test={auc_test:.3f}")
+
+    threshold = select_threshold(y_test, y_proba_test)
+
+    y_pred = (y_proba_test >= threshold).astype(int)
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1        = f1_score(y_test, y_pred)
+
+    print(f"\nTest metrics at threshold={threshold:.3f}:")
+    print(f"   Precision : {precision:.3f}")
+    print(f"   Recall    : {recall:.3f}")
+    print(f"   F1-score  : {f1:.3f}")
+    print(f"   AUC-ROC   : {auc_test:.3f}")
+
+    print(f"\nConfusion matrix (test):")
+    print(f"   TN={tn:,}  FP={fp:,}")
+    print(f"   FN={fn:,}  TP={tp:,}")
+
+    importance_df = pd.DataFrame({
+        'feature':    FEATURE_COLS,
+        'importance': dt.feature_importances_,
     }).sort_values('importance', ascending=False)
-    
-    print(f"\n⭐ Важность признаков:")
-    for idx, row in feature_importance.iterrows():
-        print(f"   {row['feature']}: {row['importance']:.3f}")
-    
-    return dt, X, y, X_test, y_test, y_pred_proba_test, feature_importance
+
+    print(f"\nFeature importance:")
+    for _, row in importance_df.iterrows():
+        bar = '#' * int(row['importance'] * 40)
+        print(f"   {row['feature']:<22}  {row['importance']:.3f}  {bar}")
+
+    return dt, X_test, y_test, y_proba_test, threshold, importance_df
 
 
-def extract_rules(dt, feature_names, threshold=0.5):
-    """
-    Извлекает интерпретируемые правила из Decision Tree.
-    """
-    print(f"\n" + "="*70)
-    print(f"📋 ПРАВИЛА МОДЕЛИ (порог: {threshold})")
-    print("="*70)
-    
-    # Пример простых правил на основе важности
-    rules = {
-        'high_risk': {
-            'description': 'Вероятность оттока > 50%',
-            'conditions': [
-                'days_to_activation > 3 дней',
-                'txn_count_week1 < 2',
-                'category_count_week1 < 2'
-            ]
-        },
-        'medium_risk': {
-            'description': 'Вероятность оттока 30-50%',
-            'conditions': [
-                'days_to_activation <= 3 дней',
-                'txn_count_week1 >= 2',
-                'category_count_week1 < 3'
-            ]
-        },
-        'low_risk': {
-            'description': 'Вероятность оттока < 30%',
-            'conditions': [
-                'days_to_activation <= 3 дней',
-                'txn_count_week1 >= 3',
-                'category_count_week1 >= 2'
-            ]
-        }
-    }
-    
-    for risk_level, rule in rules.items():
-        print(f"\n🔴 {rule['description']}:")
-        for condition in rule['conditions']:
-            print(f"   • {condition}")
-    
-    return rules
+# ---------------------------------------------------------------------------
+# Scoring & output
+# ---------------------------------------------------------------------------
+
+def score_all_cards(dt, features_df, threshold):
+    """Add churn_proba, predicted_churn, risk_level to every card."""
+    scored = features_df.copy()
+    scored['churn_proba']     = dt.predict_proba(scored[FEATURE_COLS])[:, 1]
+    scored['predicted_churn'] = (scored['churn_proba'] >= threshold).astype(int)
+
+    def _risk(p):
+        if p >= 0.70: return 'CRITICAL'
+        if p >= 0.50: return 'HIGH'
+        if p >= 0.30: return 'MEDIUM'
+        return 'LOW'
+
+    scored['risk_level'] = scored['churn_proba'].apply(_risk)
+    return scored
 
 
-def save_results(dt, features_df, X_test, y_test, y_pred_proba_test, rules, feature_importance):
-    """
-    Сохраняет результаты модели и правила.
-    """
+def save_results(scored_df, X_test, y_test, y_proba_test, threshold, importance_df):
+    """Save metrics JSON and scored_cards CSV for bonus_logic.py."""
     Path('results').mkdir(exist_ok=True)
-    
-    # Сохраняем правила
-    rules_json = {
-        'description': 'Правила для предсказания оттока клиентов',
-        'rules': rules,
-        'feature_importance': dict(zip(
-            feature_importance['feature'],
-            feature_importance['importance'].astype(float)
-        ))
-    }
-    
-    with open('results/model_rules.json', 'w') as f:
-        json.dump(rules_json, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n💾 Правила сохранены в results/model_rules.json")
-    
-    # Сохраняем метрики
-    metrics = {
-        'auc_roc': float(roc_auc_score(y_test, y_pred_proba_test)),
-        'accuracy': float((y_test == (y_pred_proba_test > 0.5)).mean()),
-        'total_cards': len(features_df),
-        'churn_rate': float(features_df['churn_day30'].mean())
-    }
-    
-    with open('results/model_metrics.json', 'w') as f:
-        json.dump(metrics, f, indent=2)
-    
-    print(f"💾 Метрики сохранены в results/model_metrics.json")
 
+    y_pred = (y_proba_test >= threshold).astype(int)
+    cm = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+    metrics = {
+        'auc_roc':               round(float(roc_auc_score(y_test, y_proba_test)), 4),
+        'threshold':             round(float(threshold), 4),
+        'precision':             round(float(precision), 4),
+        'recall':                round(float(recall), 4),
+        'f1':                    round(float(f1_score(y_test, y_pred)), 4),
+        'total_cards':           int(len(scored_df)),
+        'churn_rate':            round(float(scored_df['churn'].mean()), 4),
+        'predicted_churn_cards': int(scored_df['predicted_churn'].sum()),
+        'feature_importance': {
+            row['feature']: round(float(row['importance']), 4)
+            for _, row in importance_df.iterrows()
+        },
+    }
+
+    with open('results/model_metrics.json', 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+    print(f"\nMetrics saved  → results/model_metrics.json")
+
+    out_cols = [
+        'card_id', 'kiosk_name', 'churn_proba', 'predicted_churn',
+        'risk_level', 'cnt_m0', 'n_cats_m0', 'activated_m0',
+    ]
+    scored_df[out_cols].to_csv('results/scored_cards.csv', index=False)
+    print(f"Scored cards   → results/scored_cards.csv")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='Обучение модели предсказания оттока')
-    parser.add_argument('--data-path', type=str, default=None, help='Путь к CSV файлу')
+    parser = argparse.ArgumentParser(description='Uzum Bank churn prediction model')
+    parser.add_argument('--data-path', type=str, default=None,
+                        help='Path to CSV data file')
     args = parser.parse_args()
-    
-    print("\n🤖 УЗУМ БАНК: Модель предсказания оттока клиентов")
-    print("="*70)
-    
-    # Загружаем данные
-    df = load_data(args.data_path)
+
+    print("\nUZUM BANK: Churn Prediction Model")
+    print("=" * 70)
+
+    df = load_data(args.data_path, fallback_path='data/uzum_hackathon_dataset.csv')
     if df is None:
         return
-    
-    # Извлекаем признаки
-    print("\n🔧 Извлечение признаков...")
+
+    print(f"Rows    : {len(df):,}")
+    print(f"Cards   : {df['card_id'].nunique():,}")
+    print(f"Months  : {df['month_of_life'].max() + 1} (month_of_life 0–{df['month_of_life'].max()})")
+    print(f"is_active=1: {df.groupby('card_id')['is_active'].first().mean():.1%}")
+
+    print("\nExtracting features from month_of_life=0...")
     features_df = extract_features(df)
-    print(f"✅ Извлечено {len(features_df)} карт с признаками")
-    
-    # Обучаем модель
-    dt, X, y, X_test, y_test, y_pred_proba_test, feature_importance = train_model(features_df)
-    
-    # Извлекаем правила
-    rules = extract_rules(dt, X.columns)
-    
-    # Сохраняем результаты
-    save_results(dt, features_df, X_test, y_test, y_pred_proba_test, rules, feature_importance)
-    
-    print(f"\n✅ Модель обучена и сохранена!")
+    print(f"Cards with features : {len(features_df):,}")
+    print(f"Activated in month 0: {features_df['activated_m0'].mean():.1%}")
+
+    dt, X_test, y_test, y_proba_test, threshold, importance_df = train_model(features_df)
+
+    scored_df = score_all_cards(dt, features_df, threshold)
+    save_results(scored_df, X_test, y_test, y_proba_test, threshold, importance_df)
+
+    print(f"\nDone.")
 
 
 if __name__ == '__main__':
