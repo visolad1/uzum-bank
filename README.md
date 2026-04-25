@@ -1,121 +1,125 @@
-# Uzum Bank: Churn Prediction & Targeted Bonuses
+# Uzum Bank — Прогноз «засыпания» карт + персональные триггеры
 
-## Overview
+> Раннее обнаружение карт, которые перестанут совершать транзакции в ближайшие 30 дней,
+> и точечная отправка бонусных триггеров для возврата активности.
 
-A system for **early detection of customers likely to stop using their debit card**, and for sending them **personalized bonuses** to restore activity.
+## Что делает проект
 
-## Goals
+1. По первым **0–14 дням** жизни карты оценивает вероятность «засыпания» в окне **15–44 дня**.
+2. Каждой карте присваивает **уровень риска** (CRITICAL / HIGH / MEDIUM / LOW) и **триггер** (тип сообщения, день отправки, канал).
+3. По топ-категории карты подбирает **персональный бонус** (cashback, fee waiver, лояльность).
+4. Всё это визуализируется в Streamlit-дашборде (`app.py`).
 
-- Increase **average transactions per card per month** from 4–5 to 9–10
-- Improve **Activation Rate** (first transaction within 7 days) from 50% to 75%+
-- Grow **share of cards transacting in 3+ MCC categories** from 20% to 45%+
+## Бизнес-цели (KPI)
 
-## What We Analyze
+- Среднее число транзакций на карту в месяц: 4–5 → 9–10
+- Activation rate (первая транзакция за 7 дней): 50% → 75%+
+- Доля карт, активных в 3+ MCC-категориях: 20% → 45%+
 
-- **First purchase date** — speed of card activation
-- **Activity in the first month** — transaction count
-- **Category diversity** — how many MCC categories the card was used in
-- **Cash behavior** — ATM withdrawals
-- **Transfers** — transfers only vs. actual purchases
+## Данные
 
-## Solution
+`data/uzum_hackathon_dataset.csv` — помесячные агрегаты по картам и MCC-категориям.
 
-### 1. Decision Tree Model
+| Колонка | Описание |
+|---|---|
+| `card_id` | ID карты |
+| `kiosk_name` | регион выпуска |
+| `card_creation_date` | дата выпуска |
+| `month` | месяц агрегации |
+| `category` | MCC-категория (онлайн, офлайн, переводы, наличные…) |
+| `cnt`, `amt` | кол-во транзакций и сумма за месяц |
+| `is_active` | бизнес-метка активной карты на конец периода |
+
+## Модель (спека 4.3)
+
+**Окно наблюдения:** дни 0–14 от выпуска карты
+**Окно таргета:** дни 15–44 (засыпание = 0 транзакций в этом окне)
+
+**Признаки** (строго по ТЗ):
+
+| Категория из ТЗ | Реализация |
+|---|---|
+| Дата активации | `creation_dow`, `creation_is_weekend`, `days_to_first_txn`, `activated_week1` |
+| Кол-во транзакций в первую неделю | `cnt_week1`, `cnt_early` |
+| Разнообразие MCC | `n_cats_week1`, `n_cats_early` |
+| Канал первой транзакции | `first_txn_online / offline / transfer / cash / other` |
+
+**Алгоритм:** `DecisionTreeClassifier(max_depth=6, class_weight='balanced')` — выбран ради
+интерпретируемости (правила можно вручную верифицировать и закодить в бэкенде).
+
+**Метрики на test (20%, stratified):**
+
+| AUC-ROC | Precision | Recall | F1 | Threshold |
+|---|---|---|---|---|
+| 0.74 | 0.69 | 0.93 | 0.79 | 0.26 |
+
+**Обоснование порога:** FN (упустить уходящего) дороже FP (лишний бонус активному),
+поэтому оптимизируем по F1, но смещаемся в сторону recall. Сохраняется PR-кривая (20 точек) для интерактивной демонстрации trade-off в дашборде.
+
+## Юнит-экономика
 
 ```
-IF first_txn_month > 0 AND
-   n_categories < 2 AND
-   txn_rate < 0.4
-THEN risk = HIGH -> send bonus
+Бонус:                        200 сум
+Средний чек:               50,000 сум
+Прирост транзакций:    +3 опер./мес
+Interchange (1.5%):       750 сум/мес
+
+ROI = 750 / 200 = 3.75× в месяц
 ```
 
-**Why Decision Tree?**
-- Transparent — all rules are visible
-- Interpretable — easy to explain to business stakeholders
-- Fast — scales to any volume
-- Simple integration — rules can be hard-coded in the backend
-
-### 2. Personalized Bonuses
-
-```
-Risk level?
-├── HIGH   -> Send bonus targeting top category
-├── MEDIUM -> In-app recommendation
-└── LOW    -> Normal mode
-```
-
-### 3. A/B Test
-
-- **Control** — no bonus sent
-- **Treatment** — personalized bonus sent to HIGH RISK cards
-- **Metric** — avg transactions per card per month after 30 days
-- **Duration** — 1 month (2 weeks collection + 2 weeks measurement)
-
-## Unit Economics
-
-```
-Bonus cost:                200 UZS
-Average transaction:    50,000 UZS
-Transaction uplift:         +3 ops/month
-Interchange revenue (1.5%): 750 UZS/month
-
-ROI = 750 / 200 = 3.75x per month
-```
-
-## Project Structure
+## Структура проекта
 
 ```
 uzum-bank/
-├── README.md          # This file
-├── analysis.py        # EDA and diagnostics
-├── model.py           # Decision Tree model
-├── bonus_logic.py     # Bonus dispatch logic
-├── data/              # Dataset (git-ignored)
-└── results/           # Output files (git-ignored)
+├── README.md
+├── requirements.txt
+├── data_loader.py        ← единая загрузка + парсинг дат + month_of_life
+├── analysis.py           ← EDA + сегменты + чарты         → results/diagnostics.{json,png}
+├── model.py              ← Decision Tree + scoring         → results/model_metrics.json, scored_cards.csv
+├── bonus_logic.py        ← персональные офферы по риску    → results/bonus_candidates.{csv,json}
+├── app.py                ← Streamlit-дашборд (5 страниц)
+├── data/
+│   └── uzum_hackathon_dataset.csv
+└── results/              ← все артефакты (git-ignored)
 ```
 
-## Setup & Usage
-
-### Requirements
+## Запуск
 
 ```bash
-pip install pandas numpy scikit-learn matplotlib seaborn
+pip install -r requirements.txt
+
+# 1. Диагностика
+python3 analysis.py
+
+# 2. Обучение модели и скоринг
+python3 model.py
+
+# 3. Персональные бонусы
+python3 bonus_logic.py
+
+# 4. Дашборд
+streamlit run app.py
 ```
 
-### Run diagnostics
+## Дашборд (5 страниц)
 
-```bash
-python analysis.py --data-path data/uzum_hackathon_dataset.csv
-```
+1. **Обзор** — KPI, распределение риска, гистограмма P(dormant) с порогом
+2. **Модель** — метрики, важность признаков, PR-кривая, confusion matrix, обоснование порога
+3. **Скоринг карт** — фильтры по риску/региону/вероятности, экспорт CSV
+4. **Бонусы** — список кандидатов с триггерами, каналом и днём отправки
+5. **A/B-тест** — план эксперимента и расчёт ожидаемого ROI
 
-### Expected dataset columns
+## A/B-тест
 
-```
-card_id, kiosk_name, card_creation_date, month,
-category, cnt, amt, is_active
-```
+- **Control** — без бонуса
+- **Treatment** — персональный бонус по топ-категории для CRITICAL/HIGH
+- **Метрика** — среднее число транзакций на карту через 30 дней
+- **Длительность** — 1 месяц (2 недели сбор + 2 недели измерение)
 
-## Output
+## Ключевые находки EDA (см. `results/diagnostics.json`)
 
-### `analysis.py`
-- Activation and churn by month of card life
-- Category entry vs. maturity patterns
-- Region-level activity correlation
-- Behavioral segments with is_active=1 rates
-
-### `model.py`
-- Trained Decision Tree
-- Metrics: Precision, Recall, AUC-ROC
-- Rules exported to JSON
-
-### `bonus_logic.py`
-- List of cards to target
-- Personalized bonus offers
-
-## Key Findings (from EDA)
-
-- **61.6%** of cards made at least one transaction
-- **41%** of churned cards went dormant in month 0 (issuance month)
-- Cards using **3+ categories** have **100% is_active=1** rate
-- Entry categories: Online payments (60%), Domestic transfers (51%)
-- Top regions by transactional activity: REGION-001, REGION-069, REGION-047
+- 61.6% карт совершили хотя бы одну транзакцию.
+- 6,703 карты — сегмент «Never transacted» (главный источник потерь).
+- Карты, использующие 3+ категории, почти все имеют `is_active=1`.
+- Топ entry-категории: онлайн-оплаты, внутренние переводы.
+- Топ регионы по активности: REGION-001, REGION-069, REGION-047.

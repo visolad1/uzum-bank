@@ -1,21 +1,146 @@
 {
-  "auc_roc": 0.8635,
-  "threshold": 0.469,
-  "precision": 0.7195,
-  "recall": 0.9456,
-  "f1": 0.8172,
-  "total_cards": 17467,
-  "churn_rate": 0.5,
-  "predicted_churn_cards": 11424,
+  "model": "DecisionTree — dormancy in days 15–44",
+  "observation_window_days": "0–14",
+  "target_window_days": "15–44",
+  "auc_roc": 0.7359,
+  "threshold": 0.2625,
+  "precision": 0.6935,
+  "recall": 0.9281,
+  "f1": 0.7938,
+  "confusion_matrix": {
+    "tn": 158,
+    "fp": 308,
+    "fn": 54,
+    "tp": 697
+  },
+  "pr_curve": [
+    {
+      "threshold": 0.0,
+      "precision": 0.6171,
+      "recall": 1.0
+    },
+    {
+      "threshold": 0.0242,
+      "precision": 0.6303,
+      "recall": 0.9987
+    },
+    {
+      "threshold": 0.0645,
+      "precision": 0.6466,
+      "recall": 0.9867
+    },
+    {
+      "threshold": 0.0895,
+      "precision": 0.652,
+      "recall": 0.9854
+    },
+    {
+      "threshold": 0.1588,
+      "precision": 0.6713,
+      "recall": 0.9654
+    },
+    {
+      "threshold": 0.1795,
+      "precision": 0.6762,
+      "recall": 0.9481
+    },
+    {
+      "threshold": 0.2598,
+      "precision": 0.6829,
+      "recall": 0.9348
+    },
+    {
+      "threshold": 0.2793,
+      "precision": 0.7009,
+      "recall": 0.9081
+    },
+    {
+      "threshold": 0.3745,
+      "precision": 0.7044,
+      "recall": 0.8695
+    },
+    {
+      "threshold": 0.3827,
+      "precision": 0.7137,
+      "recall": 0.8562
+    },
+    {
+      "threshold": 0.464,
+      "precision": 0.7193,
+      "recall": 0.8429
+    },
+    {
+      "threshold": 0.4819,
+      "precision": 0.7381,
+      "recall": 0.743
+    },
+    {
+      "threshold": 0.5029,
+      "precision": 0.7497,
+      "recall": 0.7337
+    },
+    {
+      "threshold": 0.5409,
+      "precision": 0.7876,
+      "recall": 0.6764
+    },
+    {
+      "threshold": 0.5442,
+      "precision": 0.7946,
+      "recall": 0.6698
+    },
+    {
+      "threshold": 0.6783,
+      "precision": 0.81,
+      "recall": 0.6471
+    },
+    {
+      "threshold": 0.7023,
+      "precision": 0.8175,
+      "recall": 0.6205
+    },
+    {
+      "threshold": 0.7138,
+      "precision": 0.8156,
+      "recall": 0.3063
+    },
+    {
+      "threshold": 0.7536,
+      "precision": 0.8301,
+      "recall": 0.1691
+    },
+    {
+      "threshold": 0.8611,
+      "precision": 0.5,
+      "recall": 0.0027
+    }
+  ],
+  "total_cards": 9746,
+  "labeled_cards": 6082,
+  "dormancy_rate": 0.6172,
+  "predicted_dormant_cards": 8659,
+  "trigger_distribution": {
+    "push_generic": 5482,
+    "email_nurture": 1615,
+    "none": 1397,
+    "push_reminder": 861,
+    "email_discovery": 341,
+    "push_cashback": 49,
+    "push_bonus": 1
+  },
   "feature_importance": {
-    "cnt_m0": 0.7526,
-    "activated_m0": 0.1431,
-    "creation_day": 0.0745,
-    "amt_m0": 0.0251,
-    "online_share": 0.0047,
-    "n_cats_m0": 0.0,
-    "offline_share": 0.0,
-    "transfer_share": 0.0,
-    "cash_share": 0.0
+    "cnt_early": 0.8043,
+    "n_cats_early": 0.1041,
+    "days_to_first_txn": 0.0236,
+    "cnt_week1": 0.02,
+    "creation_dow": 0.0112,
+    "first_txn_online": 0.0107,
+    "creation_is_weekend": 0.0107,
+    "first_txn_offline": 0.006,
+    "n_cats_week1": 0.0038,
+    "first_txn_cash": 0.0029,
+    "first_txn_transfer": 0.0027,
+    "activated_week1": 0.0,
+    "first_txn_other": 0.0
   }
 }

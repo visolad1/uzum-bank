@@ -32,46 +32,71 @@ except ImportError:
 # Data loading and preparation
 # ---------------------------------------------------------------------------
 
-
 def build_card_monthly(df):
-    """
-    Aggregate to card-month level (sum across categories).
+    df = df.copy()
 
-    Note: is_active is a static target label per card (same across all months);
-    cnt/amt reflect actual monthly transaction activity.
-    """
+    df['card_creation_date'] = pd.to_datetime(df['card_creation_date'])
+    df['month']              = pd.to_datetime(df['month'])
+    df['days_from_creation'] = (df['month'] - df['card_creation_date']).dt.days
+
     card_month = (
-        df.groupby(['card_id', 'kiosk_name', 'card_creation_date', 'month', 'month_of_life'])
+        df.groupby(['card_id', 'kiosk_name', 'card_creation_date', 'month'])
         .agg(
-            total_cnt=('cnt', 'sum'),
-            total_amt=('amt', 'sum'),
-            n_categories_used=('cnt', lambda x: (x > 0).sum()),
-            is_active_target=('is_active', 'max'),   # static target label
+            total_cnt          = ('cnt', 'sum'),
+            total_amt          = ('amt', 'sum'),
+            n_categories_used  = ('cnt', lambda x: (x > 0).sum()),
+            is_active_target   = ('is_active', 'max'),
+            min_days           = ('days_from_creation', 'min'),
         )
         .reset_index()
     )
-    # True activity in this month: at least one transaction
+
     card_month['txn_active'] = (card_month['total_cnt'] > 0).astype(int)
+
+    # month_of_life: integer months since card creation
+    card_month['month_of_life'] = (
+        card_month['month'].dt.to_period('M') -
+        card_month['card_creation_date'].dt.to_period('M')
+    ).apply(lambda x: x.n)
+
     return card_month
 
 
 def build_card_summary(card_month):
-    """Build a per-card summary: activation, retention, region."""
     txn_active_rows = card_month[card_month['txn_active'] == 1]
 
-    n_obs = card_month.groupby('card_id')['month'].count().rename('n_months_observed')
-    n_txn_active = card_month.groupby('card_id')['txn_active'].sum().rename('n_months_with_txn')
-    is_active_target = card_month.groupby('card_id')['is_active_target'].first().rename('is_active_target')
+    n_obs           = card_month.groupby('card_id')['month'].count().rename('n_months_observed')
+    n_txn           = card_month.groupby('card_id')['txn_active'].sum().rename('n_months_with_txn')
+    is_active_target = card_month.groupby('card_id')['is_active_target'].first()
 
-    first_txn_mol = txn_active_rows.groupby('card_id')['month_of_life'].min().rename('first_txn_mol')
-    last_txn_mol = txn_active_rows.groupby('card_id')['month_of_life'].max().rename('last_txn_mol')
-    avg_cats = txn_active_rows.groupby('card_id')['n_categories_used'].mean().rename('avg_categories')
+    # Day-based timing for analyze_activation
+    first_txn_day = txn_active_rows.groupby('card_id')['min_days'].min().rename('first_txn_day')
+    last_txn_day  = txn_active_rows.groupby('card_id')['min_days'].max().rename('last_txn_day')
+
+    # Month-of-life timing for identify_segments and create_report
+    first_txn_mol = (
+        txn_active_rows.groupby('card_id')['month_of_life'].min().rename('first_txn_mol')
+    )
+    last_txn_mol = (
+        txn_active_rows.groupby('card_id')['month_of_life'].max().rename('last_txn_mol')
+    )
 
     meta = card_month.groupby('card_id')[['kiosk_name', 'card_creation_date']].first()
 
-    summary = pd.concat([meta, n_obs, n_txn_active, is_active_target, first_txn_mol, last_txn_mol, avg_cats], axis=1).reset_index()
+    summary = pd.concat([
+        meta,
+        n_obs,
+        n_txn,
+        is_active_target,
+        first_txn_day,
+        last_txn_day,
+        first_txn_mol,
+        last_txn_mol,
+    ], axis=1).reset_index()
+
     summary['ever_txn'] = summary['n_months_with_txn'] > 0
     summary['txn_rate'] = summary['n_months_with_txn'] / summary['n_months_observed']
+
     return summary
 
 
@@ -80,49 +105,28 @@ def build_card_summary(card_month):
 # ---------------------------------------------------------------------------
 
 def analyze_activation(card_month, summary):
-    """
-    Q1: In which month of card life do customers most often stop transacting?
-    Uses actual transactions (cnt > 0), not the static is_active label.
-    """
     print("\n" + "=" * 70)
-    print("1.  ACTIVATION & CHURN ANALYSIS (based on cnt > 0)")
+    print("1. ACTIVATION & EARLY BEHAVIOR (0–14 days)")
     print("=" * 70)
 
-    total = len(summary)
+    total    = len(summary)
     ever_txn = summary['ever_txn'].sum()
-    print(f"\nTotal cards:              {total:,}")
-    print(f"Cards with transactions:  {ever_txn:,} ({100 * ever_txn / total:.1f}%)")
-    print(f"Target is_active=1:       {int(summary['is_active_target'].sum()):,} "
-          f"({100 * summary['is_active_target'].mean():.1f}%)")
+
+    print(f"\nTotal cards: {total:,}")
+    print(f"Active in first 14 days: {ever_txn:,} ({100*ever_txn/total:.1f}%)")
 
     txn_summary = summary[summary['ever_txn']].copy()
-    print(f"\nFirst transactional month of card life:")
-    print(f"   Mean:    {txn_summary['first_txn_mol'].mean():.2f}")
-    print(f"   Median:  {txn_summary['first_txn_mol'].median():.0f}")
-    print(f"   Min/Max: {txn_summary['first_txn_mol'].min()} / {txn_summary['first_txn_mol'].max()}")
 
-    # Dormant: had transactions but last_txn_mol < max observed mol
-    max_mol = card_month.groupby('card_id')['month_of_life'].max().rename('max_mol')
-    churn_data = txn_summary.merge(max_mol, on='card_id')
-    churned = churn_data[churn_data['last_txn_mol'] < churn_data['max_mol']].copy()
+    print(f"\nFirst transaction timing (days from activation):")
+    print(f"   Mean   : {txn_summary['first_txn_day'].mean():.1f}")
+    print(f"   Median : {txn_summary['first_txn_day'].median():.0f}")
+    print(f"   Min/Max: {txn_summary['first_txn_day'].min()} / {txn_summary['first_txn_day'].max()}")
 
-    print(f"\nDormant cards (had transactions, then stopped): {len(churned):,}")
-    if len(churned) > 0:
-        last_dist = churned['last_txn_mol'].value_counts().sort_index()
-        print(f"\nLast active month of life (distribution):")
-        for mol, cnt in last_dist.items():
-            pct = 100 * cnt / len(churned)
-            bar = '#' * int(pct / 3)
-            print(f"   Month {mol}: {cnt:4d} cards ({pct:5.1f}%) {bar}")
+    max_day   = card_month.groupby('card_id')['min_days'].max().rename('max_day')
+    churn_data = txn_summary.merge(max_day, on='card_id')
+    churned    = churn_data[churn_data['last_txn_day'] < churn_data['max_day']]
 
-    # Correlation between txn_rate and is_active target
-    print(f"\nCorrelation between % transactional months and is_active target:")
-    for bucket in [(0, 0.01), (0.01, 0.4), (0.4, 0.7), (0.7, 1.01)]:
-        subset = summary[(summary['txn_rate'] >= bucket[0]) & (summary['txn_rate'] < bucket[1])]
-        if len(subset) > 0:
-            target_rate = 100 * subset['is_active_target'].mean()
-            label = f"{int(bucket[0]*100)}-{int(bucket[1]*100)}%"
-            print(f"   Txn months {label:>8}: {target_rate:.1f}% is_active=1 ({len(subset)} cards)")
+    print(f"\nDormant after early activity: {len(churned):,}")
 
     return txn_summary, churned
 
@@ -135,7 +139,7 @@ def analyze_categories(df, card_month):
     print("2.  MCC CATEGORY ANALYSIS")
     print("=" * 70)
 
-    # First month with any transaction (cnt > 0 in at least one category)
+    # First month_of_life with any transaction
     first_txn_mol = (
         card_month[card_month['txn_active'] == 1]
         .groupby('card_id')['month_of_life'].min()
@@ -163,15 +167,14 @@ def analyze_categories(df, card_month):
         (df_with_first['cnt'] > 0)
     ]
     if len(late_rows) > 0:
-        late_cats = late_rows.groupby('category')['card_id'].nunique().sort_values(ascending=False)
+        late_cats    = late_rows.groupby('category')['card_id'].nunique().sort_values(ascending=False)
         n_late_cards = late_rows['card_id'].nunique()
         print(f"\nMATURE CATEGORIES (appear 2+ months after first txn, top 5):")
         for cat, cnt in late_cats.head(5).items():
             pct = 100 * cnt / n_late_cards
             print(f"   {cat}: {cnt} cards ({pct:.1f}%)")
 
-    # Exclusively late: only appear after the first month, never in it
-    if len(late_rows) > 0:
+        # Exclusively late: never appear in the entry month
         entry_card_cat = set(zip(entry_rows['card_id'], entry_rows['category']))
         late_rows_copy = late_rows.copy()
         late_rows_copy['in_entry'] = late_rows_copy.apply(
@@ -186,7 +189,7 @@ def analyze_categories(df, card_month):
                 print(f"   {cat}: {cnt} cards ({pct:.1f}%)")
 
     # Category diversity vs is_active target
-    card_target = card_month.groupby('card_id')[['is_active_target']].first()
+    card_target  = card_month.groupby('card_id')[['is_active_target']].first()
     cat_per_card = (
         df_with_first[df_with_first['cnt'] > 0]
         .groupby('card_id')['category'].nunique()
@@ -194,8 +197,10 @@ def analyze_categories(df, card_month):
         .reset_index()
     )
     cat_target = cat_per_card.merge(card_target, on='card_id')
-    cat_target['bucket'] = pd.cut(cat_target['total_cats'], bins=[0, 1, 2, 3, 20],
-                                   labels=['1', '2', '3', '4+'], right=True)
+    cat_target['bucket'] = pd.cut(
+        cat_target['total_cats'], bins=[0, 1, 2, 3, 20],
+        labels=['1', '2', '3', '4+'], right=True
+    )
 
     print(f"\nis_active=1 rate by number of categories used:")
     for b in ['1', '2', '3', '4+']:
@@ -218,15 +223,15 @@ def analyze_channels(card_month, summary):
     region_stats = (
         summary.groupby('kiosk_name')
         .agg(
-            n_cards=('card_id', 'count'),
-            pct_ever_txn=('ever_txn', 'mean'),
-            avg_txn_rate=('txn_rate', 'mean'),
-            pct_is_active=('is_active_target', 'mean'),
+            n_cards      = ('card_id', 'count'),
+            pct_ever_txn = ('ever_txn', 'mean'),
+            avg_txn_rate = ('txn_rate', 'mean'),
+            pct_is_active = ('is_active_target', 'mean'),
         )
         .reset_index()
     )
-    region_stats['pct_ever_txn'] *= 100
-    region_stats['avg_txn_rate'] *= 100
+    region_stats['pct_ever_txn']  *= 100
+    region_stats['avg_txn_rate']  *= 100
     region_stats['pct_is_active'] *= 100
     region_stats = region_stats.sort_values('avg_txn_rate', ascending=False)
 
@@ -250,20 +255,21 @@ def identify_segments(card_month, summary):
     print("=" * 70)
 
     max_mol = card_month.groupby('card_id')['month_of_life'].max().rename('max_mol')
-    cards = summary.merge(max_mol, on='card_id')
+    cards   = summary.merge(max_mol, on='card_id')
 
     def get_segment(row):
         if not row['ever_txn']:
             return 'Never transacted'
-        mol = row['first_txn_mol']
-        n_txn = row['n_months_with_txn']
-        n_obs = row['n_months_observed']
-        last = row['last_txn_mol']
-        max_m = row['max_mol']
 
-        fast_start = mol <= 0
-        high_stability = n_txn / n_obs >= 0.6
-        dropped = last < max_m  # was active but stopped before last observed month
+        mol   = row['first_txn_mol']       # month_of_life of first transaction
+        n_txn = row['n_months_with_txn']   # count of months with transactions
+        n_obs = row['n_months_observed']   # total months observed
+        last  = row['last_txn_mol']        # month_of_life of last transaction
+        max_m = row['max_mol']             # latest observed month_of_life
+
+        fast_start     = mol <= 0
+        high_stability = (n_txn / n_obs) >= 0.6 if n_obs > 0 else False
+        dropped        = last < max_m     # stopped before last observed month
 
         if fast_start and dropped and n_txn <= 2:
             return 'Fast start / fast sleep'
@@ -283,9 +289,9 @@ def identify_segments(card_month, summary):
     seg_stats = (
         cards.groupby('segment')
         .agg(
-            n=('card_id', 'count'),
-            avg_txn_months=('n_months_with_txn', 'mean'),
-            pct_is_active=('is_active_target', 'mean'),
+            n              = ('card_id', 'count'),
+            avg_txn_months = ('n_months_with_txn', 'mean'),
+            pct_is_active  = ('is_active_target', 'mean'),
         )
         .sort_values('n', ascending=False)
     )
@@ -311,30 +317,30 @@ def create_report(card_month, summary, cards_df, region_stats):
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     fig.suptitle('Uzum Bank: Diagnostics of Debit Card Activity', fontsize=15, fontweight='bold')
 
-    # 1. Первый транзакционный месяц жизни
+    # 1. First transactional month of card life
     txn_cards = summary[summary['ever_txn']]
-    mol_dist = txn_cards['first_txn_mol'].value_counts().sort_index()
+    mol_dist  = txn_cards['first_txn_mol'].value_counts().sort_index()
     axes[0, 0].bar(mol_dist.index, mol_dist.values, color='steelblue')
     axes[0, 0].set_xlabel('Month of card life')
     axes[0, 0].set_ylabel('Number of cards')
     axes[0, 0].set_title('First transaction: month of card life')
     axes[0, 0].grid(axis='y', alpha=0.3)
 
-    # 2. Регионы: % транзакционных месяцев (топ-15)
+    # 2. Regions: % transactional months (top 15)
     top_regions = region_stats.head(15)
     axes[0, 1].barh(top_regions['kiosk_name'], top_regions['avg_txn_rate'], color='coral')
     axes[0, 1].set_xlabel('% months with transactions')
     axes[0, 1].set_title('Regions: avg % transactional months')
     axes[0, 1].grid(axis='x', alpha=0.3)
 
-    # 3. Сегменты — количество карт
+    # 3. Segments — card count
     seg_counts = cards_df['segment'].value_counts()
     axes[1, 0].barh(seg_counts.index, seg_counts.values, color='mediumseagreen')
     axes[1, 0].set_xlabel('Number of cards')
     axes[1, 0].set_title('Behavioral segments')
     axes[1, 0].grid(axis='x', alpha=0.3)
 
-    # 4. % карт с транзакциями по месяцам жизни
+    # 4. % cards with transactions by month of life
     mol_activity = (
         card_month.groupby('month_of_life')['txn_active']
         .mean()
@@ -372,33 +378,33 @@ def main():
     df = load_data(args.data_path, fallback_path='data/uzum_hackathon_dataset.csv')
     if df is None:
         return
+
     print(f"\nRows loaded:    {len(df):,}")
     print(f"Unique cards:   {df['card_id'].nunique():,}")
     print(f"Period:         {df['month'].min().strftime('%Y-%m')} - {df['month'].max().strftime('%Y-%m')}")
     print(f"Categories:     {df['category'].nunique()}")
     print(f"Regions:        {df['kiosk_name'].nunique()}")
 
-    card_month = build_card_monthly(df)
-    summary = build_card_summary(card_month)
+    card_month = build_card_monthly(df)   # month_of_life computed inside
+    summary    = build_card_summary(card_month)
 
-    active_summary, churned = analyze_activation(card_month, summary)
-    first_txn_mol, cat_target = analyze_categories(df, card_month)
-    region_stats = analyze_channels(card_month, summary)
-    cards_df = identify_segments(card_month, summary)
+    active_summary, churned     = analyze_activation(card_month, summary)
+    first_txn_mol, cat_target   = analyze_categories(df, card_month)
+    region_stats                = analyze_channels(card_month, summary)
+    cards_df                    = identify_segments(card_month, summary)
 
     if PLOT_AVAILABLE:
         create_report(card_month, summary, cards_df, region_stats)
 
-    # Save results
     Path('results').mkdir(exist_ok=True)
 
     diagnostics = {
-        'total_cards': int(summary['card_id'].nunique()),
-        'ever_txn_cards': int(summary['ever_txn'].sum()),
-        'ever_txn_rate_pct': float(100 * summary['ever_txn'].mean()),
+        'total_cards':         int(summary['card_id'].nunique()),
+        'ever_txn_cards':      int(summary['ever_txn'].sum()),
+        'ever_txn_rate_pct':   float(100 * summary['ever_txn'].mean()),
         'is_active_target_pct': float(100 * summary['is_active_target'].mean()),
-        'churned_cards': int(len(churned)),
-        'segments': cards_df['segment'].value_counts().to_dict(),
+        'churned_cards':       int(len(churned)),
+        'segments':            cards_df['segment'].value_counts().to_dict(),
     }
 
     with open('results/diagnostics.json', 'w', encoding='utf-8') as f:
