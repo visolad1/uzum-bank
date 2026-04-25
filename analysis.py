@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Диагностика данных о дебетовых картах Uzum Bank.
-Датасет: помесячные агрегаты по категориям (cnt, amt, is_active).
+Diagnostic analysis of Uzum Bank debit card data.
+Dataset: monthly aggregates per category (cnt, amt, is_active).
 
-Отвечает на вопросы:
-- На каком месяце жизни карты клиент чаще перестаёт платить?
-- Какие MCC-категории входные, какие — признак зрелого пользователя?
-- Есть ли сегменты, которые активируются быстро, но быстро засыпают?
-- Какой регион коррелирует с долгосрочной активностью?
+Answers the following questions:
+- In which month of card life do customers most often stop transacting?
+- Which MCC categories are entry-level and which indicate a mature user?
+- Are there segments that activate quickly but go dormant fast?
+- Which region correlates with long-term activity?
 """
 
 import pandas as pd
@@ -24,26 +24,26 @@ try:
     PLOT_AVAILABLE = True
 except ImportError:
     PLOT_AVAILABLE = False
-    print("⚠️  matplotlib/seaborn не установлены. Графики не будут созданы.")
+    print("Warning: matplotlib/seaborn not installed. Charts will not be generated.")
 
 
 # ---------------------------------------------------------------------------
-# Загрузка и подготовка
+# Data loading and preparation
 # ---------------------------------------------------------------------------
 
 def load_data(data_path):
-    """Загружает CSV и добавляет month_of_life."""
+    """Load CSV and derive month_of_life for each row."""
     path = Path(data_path)
     if not path.exists():
-        raise FileNotFoundError(f"Файл не найден: {data_path}")
+        raise FileNotFoundError(f"File not found: {data_path}")
 
-    print(f"📂 Загружаю данные из {data_path}...")
+    print(f"Loading data from {data_path}...")
     df = pd.read_csv(data_path)
 
     df['month'] = pd.to_datetime(df['month'])
     df['card_creation_date'] = pd.to_datetime(df['card_creation_date'])
 
-    # Месяц жизни карты: 0 = месяц выпуска, 1 = следующий месяц и т.д.
+    # month_of_life: 0 = issuance month, 1 = next month, etc.
     creation_period = df['card_creation_date'].dt.to_period('M')
     month_period = df['month'].dt.to_period('M')
     df['month_of_life'] = (month_period - creation_period).apply(lambda x: x.n)
@@ -53,10 +53,10 @@ def load_data(data_path):
 
 def build_card_monthly(df):
     """
-    Агрегирует до уровня карта-месяц (суммирует по категориям).
+    Aggregate to card-month level (sum across categories).
 
-    Примечание: is_active — статичный таргет-флаг карты (одинаков для всех
-    месяцев), cnt/amt — реальная помесячная активность.
+    Note: is_active is a static target label per card (same across all months);
+    cnt/amt reflect actual monthly transaction activity.
     """
     card_month = (
         df.groupby(['card_id', 'kiosk_name', 'card_creation_date', 'month', 'month_of_life'])
@@ -64,17 +64,17 @@ def build_card_monthly(df):
             total_cnt=('cnt', 'sum'),
             total_amt=('amt', 'sum'),
             n_categories_used=('cnt', lambda x: (x > 0).sum()),
-            is_active_target=('is_active', 'max'),   # таргет-флаг (статичный)
+            is_active_target=('is_active', 'max'),   # static target label
         )
         .reset_index()
     )
-    # Реальная активность в этом месяце: хотя бы одна транзакция
+    # True activity in this month: at least one transaction
     card_month['txn_active'] = (card_month['total_cnt'] > 0).astype(int)
     return card_month
 
 
 def build_card_summary(card_month):
-    """Сводка по каждой карте: активация, удержание, регион."""
+    """Build a per-card summary: activation, retention, region."""
     txn_active_rows = card_month[card_month['txn_active'] == 1]
 
     n_obs = card_month.groupby('card_id')['month'].count().rename('n_months_observed')
@@ -94,66 +94,66 @@ def build_card_summary(card_month):
 
 
 # ---------------------------------------------------------------------------
-# Анализы
+# Analysis functions
 # ---------------------------------------------------------------------------
 
 def analyze_activation(card_month, summary):
     """
-    Q1: На каком месяце жизни карты клиент чаще перестаёт платить?
-    Используем реальные транзакции (cnt > 0), не статичный is_active.
+    Q1: In which month of card life do customers most often stop transacting?
+    Uses actual transactions (cnt > 0), not the static is_active label.
     """
     print("\n" + "=" * 70)
-    print("1️⃣  АНАЛИЗ АКТИВАЦИИ И ОТТОКА (по cnt > 0)")
+    print("1.  ACTIVATION & CHURN ANALYSIS (based on cnt > 0)")
     print("=" * 70)
 
     total = len(summary)
     ever_txn = summary['ever_txn'].sum()
-    print(f"\n📊 Карт всего:              {total:,}")
-    print(f"📊 Совершили транзакцию:    {ever_txn:,} ({100 * ever_txn / total:.1f}%)")
-    print(f"📊 Таргет is_active=1:      {int(summary['is_active_target'].sum()):,} "
+    print(f"\nTotal cards:              {total:,}")
+    print(f"Cards with transactions:  {ever_txn:,} ({100 * ever_txn / total:.1f}%)")
+    print(f"Target is_active=1:       {int(summary['is_active_target'].sum()):,} "
           f"({100 * summary['is_active_target'].mean():.1f}%)")
 
     txn_summary = summary[summary['ever_txn']].copy()
-    print(f"\n⏱️  Первый месяц жизни с транзакцией:")
-    print(f"   Среднее:  {txn_summary['first_txn_mol'].mean():.2f}")
-    print(f"   Медиана:  {txn_summary['first_txn_mol'].median():.0f}")
-    print(f"   Мин/Макс: {txn_summary['first_txn_mol'].min()} / {txn_summary['first_txn_mol'].max()}")
+    print(f"\nFirst transactional month of card life:")
+    print(f"   Mean:    {txn_summary['first_txn_mol'].mean():.2f}")
+    print(f"   Median:  {txn_summary['first_txn_mol'].median():.0f}")
+    print(f"   Min/Max: {txn_summary['first_txn_mol'].min()} / {txn_summary['first_txn_mol'].max()}")
 
-    # Уснувшие: были транзакции, но last_txn_mol < max наблюдаемого mol
+    # Dormant: had transactions but last_txn_mol < max observed mol
     max_mol = card_month.groupby('card_id')['month_of_life'].max().rename('max_mol')
     churn_data = txn_summary.merge(max_mol, on='card_id')
     churned = churn_data[churn_data['last_txn_mol'] < churn_data['max_mol']].copy()
 
-    print(f"\n📉 Уснувших карт (были транзакции, потом прекратились): {len(churned):,}")
+    print(f"\nDormant cards (had transactions, then stopped): {len(churned):,}")
     if len(churned) > 0:
         last_dist = churned['last_txn_mol'].value_counts().sort_index()
-        print(f"\n🔻 Последний активный месяц жизни (распределение):")
+        print(f"\nLast active month of life (distribution):")
         for mol, cnt in last_dist.items():
             pct = 100 * cnt / len(churned)
-            bar = '█' * int(pct / 3)
-            print(f"   Месяц {mol}: {cnt:4d} карт ({pct:5.1f}%) {bar}")
+            bar = '#' * int(pct / 3)
+            print(f"   Month {mol}: {cnt:4d} cards ({pct:5.1f}%) {bar}")
 
-    # Корреляция is_active с txn_rate
-    print(f"\n🎯 Связь между % активных месяцев и таргетом is_active:")
+    # Correlation between txn_rate and is_active target
+    print(f"\nCorrelation between % transactional months and is_active target:")
     for bucket in [(0, 0.01), (0.01, 0.4), (0.4, 0.7), (0.7, 1.01)]:
         subset = summary[(summary['txn_rate'] >= bucket[0]) & (summary['txn_rate'] < bucket[1])]
         if len(subset) > 0:
             target_rate = 100 * subset['is_active_target'].mean()
             label = f"{int(bucket[0]*100)}-{int(bucket[1]*100)}%"
-            print(f"   Транзакций {label:>8} мес.: {target_rate:.1f}% is_active=1 ({len(subset)} карт)")
+            print(f"   Txn months {label:>8}: {target_rate:.1f}% is_active=1 ({len(subset)} cards)")
 
     return txn_summary, churned
 
 
 def analyze_categories(df, card_month):
     """
-    Q2: Какие категории входные, какие — зрелые?
+    Q2: Which categories are entry-level and which indicate a mature user?
     """
     print("\n" + "=" * 70)
-    print("2️⃣  АНАЛИЗ MCC-КАТЕГОРИЙ")
+    print("2.  MCC CATEGORY ANALYSIS")
     print("=" * 70)
 
-    # Первый месяц с транзакциями (cnt > 0 хоть в одной категории)
+    # First month with any transaction (cnt > 0 in at least one category)
     first_txn_mol = (
         card_month[card_month['txn_active'] == 1]
         .groupby('card_id')['month_of_life'].min()
@@ -162,7 +162,7 @@ def analyze_categories(df, card_month):
     )
     n_ever_txn = len(first_txn_mol)
 
-    # Категории в первый транзакционный месяц
+    # Categories used in the first transactional month
     df_with_first = df.merge(first_txn_mol, on='card_id')
     entry_rows = df_with_first[
         (df_with_first['month_of_life'] == df_with_first['first_txn_mol']) &
@@ -170,12 +170,12 @@ def analyze_categories(df, card_month):
     ]
     entry_cats = entry_rows.groupby('category')['card_id'].nunique().sort_values(ascending=False)
 
-    print(f"\n📍 ВХОДНЫЕ КАТЕГОРИИ (первый транзакционный месяц, топ-5):")
+    print(f"\nENTRY CATEGORIES (first transactional month, top 5):")
     for cat, cnt in entry_cats.head(5).items():
         pct = 100 * cnt / n_ever_txn
-        print(f"   {cat}: {cnt} карт ({pct:.1f}%)")
+        print(f"   {cat}: {cnt} cards ({pct:.1f}%)")
 
-    # Зрелые категории: появляются через 2+ месяца после первой транзакции
+    # Mature categories: appear 2+ months after first transaction
     late_rows = df_with_first[
         (df_with_first['month_of_life'] >= df_with_first['first_txn_mol'] + 2) &
         (df_with_first['cnt'] > 0)
@@ -183,12 +183,12 @@ def analyze_categories(df, card_month):
     if len(late_rows) > 0:
         late_cats = late_rows.groupby('category')['card_id'].nunique().sort_values(ascending=False)
         n_late_cards = late_rows['card_id'].nunique()
-        print(f"\n👑 ЗРЕЛЫЕ КАТЕГОРИИ (появляются 2+ мес. после старта, топ-5):")
+        print(f"\nMATURE CATEGORIES (appear 2+ months after first txn, top 5):")
         for cat, cnt in late_cats.head(5).items():
             pct = 100 * cnt / n_late_cards
-            print(f"   {cat}: {cnt} карт ({pct:.1f}%)")
+            print(f"   {cat}: {cnt} cards ({pct:.1f}%)")
 
-    # Уникально-поздние: только в поздних месяцах, не в первом
+    # Exclusively late: only appear after the first month, never in it
     if len(late_rows) > 0:
         entry_card_cat = set(zip(entry_rows['card_id'], entry_rows['category']))
         late_rows_copy = late_rows.copy()
@@ -198,12 +198,12 @@ def analyze_categories(df, card_month):
         only_late = late_rows_copy[~late_rows_copy['in_entry']]
         if len(only_late) > 0:
             only_late_cats = only_late.groupby('category')['card_id'].nunique().sort_values(ascending=False)
-            print(f"\n🔮 ЭКСКЛЮЗИВНО ЗРЕЛЫЕ (появляются только после первого мес.):")
+            print(f"\nEXCLUSIVELY MATURE (never appear in first month):")
             for cat, cnt in only_late_cats.items():
                 pct = 100 * cnt / n_late_cards
-                print(f"   {cat}: {cnt} карт ({pct:.1f}%)")
+                print(f"   {cat}: {cnt} cards ({pct:.1f}%)")
 
-    # Диверсификация vs is_active target
+    # Category diversity vs is_active target
     card_target = card_month.groupby('card_id')[['is_active_target']].first()
     cat_per_card = (
         df_with_first[df_with_first['cnt'] > 0]
@@ -215,22 +215,22 @@ def analyze_categories(df, card_month):
     cat_target['bucket'] = pd.cut(cat_target['total_cats'], bins=[0, 1, 2, 3, 20],
                                    labels=['1', '2', '3', '4+'], right=True)
 
-    print(f"\n🎯 is_active=1 по числу использованных категорий:")
+    print(f"\nis_active=1 rate by number of categories used:")
     for b in ['1', '2', '3', '4+']:
         subset = cat_target[cat_target['bucket'] == b]
         if len(subset) > 0:
             rate = 100 * subset['is_active_target'].mean()
-            print(f"   {b} категорий: {rate:.1f}% is_active=1 ({len(subset)} карт)")
+            print(f"   {b} categories: {rate:.1f}% is_active=1 ({len(subset)} cards)")
 
     return first_txn_mol, cat_target
 
 
 def analyze_channels(card_month, summary):
     """
-    Q4: Какой регион коррелирует с долгосрочной активностью?
+    Q4: Which region correlates with long-term activity?
     """
     print("\n" + "=" * 70)
-    print("3️⃣  АНАЛИЗ РЕГИОНОВ (kiosk_name)")
+    print("3.  REGION ANALYSIS (kiosk_name)")
     print("=" * 70)
 
     region_stats = (
@@ -248,12 +248,12 @@ def analyze_channels(card_month, summary):
     region_stats['pct_is_active'] *= 100
     region_stats = region_stats.sort_values('avg_txn_rate', ascending=False)
 
-    print(f"\n🏆 Топ-10 регионов по % транзакционных месяцев:")
-    print(f"   {'Регион':<15} {'Карт':>6} {'С транзакцией':>14} {'% тр.мес.':>10} {'is_active=1':>11}")
-    print(f"   {'-'*15} {'-'*6} {'-'*14} {'-'*10} {'-'*11}")
+    print(f"\nTop 10 regions by % transactional months:")
+    print(f"   {'Region':<15} {'Cards':>6} {'Ever transacted':>15} {'% txn months':>13} {'is_active=1':>11}")
+    print(f"   {'-'*15} {'-'*6} {'-'*15} {'-'*13} {'-'*11}")
     for _, row in region_stats.head(10).iterrows():
         print(f"   {row['kiosk_name']:<15} {int(row['n_cards']):>6} "
-              f"{row['pct_ever_txn']:>13.1f}% {row['avg_txn_rate']:>9.1f}% "
+              f"{row['pct_ever_txn']:>14.1f}% {row['avg_txn_rate']:>12.1f}% "
               f"{row['pct_is_active']:>10.1f}%")
 
     return region_stats
@@ -261,10 +261,10 @@ def analyze_channels(card_month, summary):
 
 def identify_segments(card_month, summary):
     """
-    Q3: Сегменты по поведению активации и оттока (на основе cnt).
+    Q3: Behavioral segments based on activation and churn patterns (cnt-based).
     """
     print("\n" + "=" * 70)
-    print("4️⃣  ПОВЕДЕНЧЕСКИЕ СЕГМЕНТЫ")
+    print("4.  BEHAVIORAL SEGMENTS")
     print("=" * 70)
 
     max_mol = card_month.groupby('card_id')['month_of_life'].max().rename('max_mol')
@@ -272,7 +272,7 @@ def identify_segments(card_month, summary):
 
     def get_segment(row):
         if not row['ever_txn']:
-            return 'Никогда не транзакционировал'
+            return 'Never transacted'
         mol = row['first_txn_mol']
         n_txn = row['n_months_with_txn']
         n_obs = row['n_months_observed']
@@ -281,23 +281,23 @@ def identify_segments(card_month, summary):
 
         fast_start = mol <= 0
         high_stability = n_txn / n_obs >= 0.6
-        dropped = last < max_m  # был активен, но последний мес. — не последний набл.
+        dropped = last < max_m  # was active but stopped before last observed month
 
         if fast_start and dropped and n_txn <= 2:
-            return 'Быстрый старт / быстрый сон'
+            return 'Fast start / fast sleep'
         if fast_start and high_stability:
-            return 'Стабильный активный'
+            return 'Stable active'
         if fast_start and not high_stability:
-            return 'Ранний старт, нестабильный'
+            return 'Early start, unstable'
         if mol >= 2 and high_stability:
-            return 'Поздняя активация, стабильный'
+            return 'Late activation, stable'
         if n_txn == 1:
-            return 'Разовое использование'
-        return 'Прочее'
+            return 'One-time use'
+        return 'Other'
 
     cards['segment'] = cards.apply(get_segment, axis=1)
 
-    print(f"\n📊 Сегментация клиентов:")
+    print(f"\nCustomer segmentation:")
     seg_stats = (
         cards.groupby('segment')
         .agg(
@@ -309,23 +309,23 @@ def identify_segments(card_month, summary):
     )
     for seg, row in seg_stats.iterrows():
         print(f"   [{seg}]")
-        print(f"      Карт: {int(row['n'])}, "
-              f"Средн. тр.мес.: {row['avg_txn_months']:.1f}, "
+        print(f"      Cards: {int(row['n'])}, "
+              f"Avg txn months: {row['avg_txn_months']:.1f}, "
               f"is_active=1: {row['pct_is_active']*100:.1f}%")
 
     return cards
 
 
 # ---------------------------------------------------------------------------
-# Визуализация
+# Visualization
 # ---------------------------------------------------------------------------
 
 def create_report(card_month, summary, cards_df, region_stats):
     if not PLOT_AVAILABLE:
-        print("\n⚠️  Визуализация недоступна.")
+        print("\nVisualization unavailable (install matplotlib and seaborn).")
         return
 
-    print("\n📊 Создаю визуализацию...")
+    print("\nGenerating charts...")
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     fig.suptitle('Uzum Bank: Diagnostics of Debit Card Activity', fontsize=15, fontweight='bold')
 
@@ -369,30 +369,30 @@ def create_report(card_month, summary, cards_df, region_stats):
     plt.tight_layout()
     Path('results').mkdir(exist_ok=True)
     plt.savefig('results/diagnostics.png', dpi=150, bbox_inches='tight')
-    print("💾 График сохранён в results/diagnostics.png")
+    print("Chart saved to results/diagnostics.png")
     plt.close()
 
 
 # ---------------------------------------------------------------------------
-# Точка входа
+# Entry point
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='Диагностика данных карт Узум Банка')
+    parser = argparse.ArgumentParser(description='Uzum Bank debit card diagnostic analysis')
     parser.add_argument('--data-path', type=str,
                         default='data/uzum_hackathon_dataset.csv',
-                        help='Путь к CSV файлу с данными')
+                        help='Path to the CSV data file')
     args = parser.parse_args()
 
-    print("\n🏦 УЗУМ БАНК: Диагностика активности дебетовых карт")
+    print("\nUZUM BANK: Debit Card Activity Diagnostics")
     print("=" * 70)
 
     df = load_data(args.data_path)
-    print(f"\n✅ Загружено строк:    {len(df):,}")
-    print(f"✅ Уникальных карт:   {df['card_id'].nunique():,}")
-    print(f"✅ Период:            {df['month'].min().strftime('%Y-%m')} — {df['month'].max().strftime('%Y-%m')}")
-    print(f"✅ Категорий:         {df['category'].nunique()}")
-    print(f"✅ Регионов:          {df['kiosk_name'].nunique()}")
+    print(f"\nRows loaded:    {len(df):,}")
+    print(f"Unique cards:   {df['card_id'].nunique():,}")
+    print(f"Period:         {df['month'].min().strftime('%Y-%m')} - {df['month'].max().strftime('%Y-%m')}")
+    print(f"Categories:     {df['category'].nunique()}")
+    print(f"Regions:        {df['kiosk_name'].nunique()}")
 
     card_month = build_card_monthly(df)
     summary = build_card_summary(card_month)
@@ -405,7 +405,7 @@ def main():
     if PLOT_AVAILABLE:
         create_report(card_month, summary, cards_df, region_stats)
 
-    # Сохраняем результаты
+    # Save results
     Path('results').mkdir(exist_ok=True)
 
     diagnostics = {
@@ -420,8 +420,8 @@ def main():
     with open('results/diagnostics.json', 'w', encoding='utf-8') as f:
         json.dump(diagnostics, f, indent=2, ensure_ascii=False)
 
-    print(f"\n💾 Результаты сохранены в results/")
-    print(f"\n✅ Диагностика завершена!")
+    print(f"\nResults saved to results/")
+    print(f"\nDiagnostics complete.")
 
 
 if __name__ == '__main__':

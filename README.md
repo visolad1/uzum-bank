@@ -1,233 +1,121 @@
-# 🏦 Uzum Bank: Модель предсказания оттока и целевые бонусы
+# Uzum Bank: Churn Prediction & Targeted Bonuses
 
-## 📋 Описание задачи
+## Overview
 
-Система для **раннего выявления клиентов, которые скоро перестанут пользоваться дебетовой картой**, и отправки им **персонализированных бонусов** для восстановления активности.
+A system for **early detection of customers likely to stop using their debit card**, and for sending them **personalized bonuses** to restore activity.
 
-## 🎯 Цель
+## Goals
 
-- Увеличить **среднее количество транзакций на карту/месяц** с 4-5 до 9-10
-- Повысить **Activation Rate** (первая транзакция ≤7 дней) с 50% до 75%+
-- Увеличить **долю карт с транзакциями в 3+ MCC-категориях** с 20% до 45%+
+- Increase **average transactions per card per month** from 4–5 to 9–10
+- Improve **Activation Rate** (first transaction within 7 days) from 50% to 75%+
+- Grow **share of cards transacting in 3+ MCC categories** from 20% to 45%+
 
-## 📊 Что анализируем
+## What We Analyze
 
-✅ **Дата первой покупки** — скорость активации карты  
-✅ **Активность в первую неделю** — количество транзакций  
-✅ **Канал платежа** — POS, онлайн или in-app  
-✅ **Диверсификация** — в скольких категориях платил  
-✅ **Поведение с наличкой** — снимал ли наличку  
-✅ **Переводы** — только ли переводы или есть покупки  
+- **First purchase date** — speed of card activation
+- **Activity in the first month** — transaction count
+- **Category diversity** — how many MCC categories the card was used in
+- **Cash behavior** — ATM withdrawals
+- **Transfers** — transfers only vs. actual purchases
 
-## 🚀 Решение
+## Solution
 
-### 1. Decision Tree Модель
-```python
-ЕСЛИ first_transaction_day > 3 И
-   transactions_week1 < 2 И
-   mcc_diversity < 2
-ТО risk = HIGH → отправить бонус
-```
-
-**Почему Decision Tree?**
-- 🔍 **Прозрачность** — все правила видны
-- 📖 **Интерпретируемость** — легко объяснить бизнесу
-- ⚡ **Быстрая работа** — масштабируется на любой объём
-- 💾 **Простая интеграция** — правила легко закодить в backend
-
-### 2. Персонализированные бонусы
-```
-УЗ в категориях?
-├── Высокий риск (HIGH)
-│   └── Отправить бонус на TOP категорию
-├── Средний риск (MEDIUM)
-│   └── Рекомендация в приложении
-└── Низкий риск (LOW)
-    └── Обычный режим
-```
-
-### 3. A/B-тест
-- **Контроль** — НЕ отправляют бонус
-- **Тест** — Отправляют персонализированный бонус HIGH RISK клиентам
-- **Метрика** — Средн. транзакций/карта/месяц через 30 дней
-- **Срок** — 1 месяц (2 недели сбора + 2 недели замера)
-
-## 💰 Юнит-экономика
+### 1. Decision Tree Model
 
 ```
-Стоимость бонуса:           200 сум
-Средний чек:                50,000 сум
-Прирост транзакций:        +3 операции/месяц
-Interchange доход (1.5%):   750 сум/месяц
-
-ROI = 750 / 200 = 3.75x за месяц
+IF first_txn_month > 0 AND
+   n_categories < 2 AND
+   txn_rate < 0.4
+THEN risk = HIGH -> send bonus
 ```
 
-## 📁 Структура проекта
+**Why Decision Tree?**
+- Transparent — all rules are visible
+- Interpretable — easy to explain to business stakeholders
+- Fast — scales to any volume
+- Simple integration — rules can be hard-coded in the backend
+
+### 2. Personalized Bonuses
+
+```
+Risk level?
+├── HIGH   -> Send bonus targeting top category
+├── MEDIUM -> In-app recommendation
+└── LOW    -> Normal mode
+```
+
+### 3. A/B Test
+
+- **Control** — no bonus sent
+- **Treatment** — personalized bonus sent to HIGH RISK cards
+- **Metric** — avg transactions per card per month after 30 days
+- **Duration** — 1 month (2 weeks collection + 2 weeks measurement)
+
+## Unit Economics
+
+```
+Bonus cost:                200 UZS
+Average transaction:    50,000 UZS
+Transaction uplift:         +3 ops/month
+Interchange revenue (1.5%): 750 UZS/month
+
+ROI = 750 / 200 = 3.75x per month
+```
+
+## Project Structure
 
 ```
 uzum-bank/
-├── README.md                      # Этот файл
-├── MODEL_EXPLANATION.md           # Детальное описание модели
-├── AB_TEST_PLAN.md                # План A/B-теста
-├── ECONOMICS.md                   # Расчёты ROI
-│
-├── data/
-│   ├── sample_data.csv            # Пример синтетического датасета
-│   └── YOUR_DATA_HERE.md          # Инструкция по загрузке ваших данных
-│
-├── analysis.py                    # Диагностика и EDA
-├── model.py                       # Decision Tree модель
-├── bonus_logic.py                 # Логика отправки бонусов
-├── ab_test_design.py              # Дизайн A/B-теста
-├── economics.py                   # Расчёты юнит-экономики
-│
-└── results/
-    ├── model_rules.json           # Правила модели для backend
-    ├── diagnostics.html           # Визуализация диагностики
-    └── ab_test_power.txt          # Статистическая мощность теста
+├── README.md          # This file
+├── analysis.py        # EDA and diagnostics
+├── model.py           # Decision Tree model
+├── bonus_logic.py     # Bonus dispatch logic
+├── data/              # Dataset (git-ignored)
+└── results/           # Output files (git-ignored)
 ```
 
-## 🔧 Установка и запуск
+## Setup & Usage
 
-### Требования
+### Requirements
+
 ```bash
 pip install pandas numpy scikit-learn matplotlib seaborn
 ```
 
-### Быстрый старт с демо-данными
+### Run diagnostics
+
 ```bash
-# Диагностика
-python analysis.py
-
-# Обучение модели
-python model.py
-
-# Логика отправки бонусов
-python bonus_logic.py
-
-# Расчёты A/B-теста
-python ab_test_design.py
-
-# Расчёты экономики
-python economics.py
+python analysis.py --data-path data/uzum_hackathon_dataset.csv
 ```
 
-### Использование ваших данных
+### Expected dataset columns
 
-**📌 ВАЖНО: Датасет предоставляется локально пользователем**
-
-1. **Подготовьте CSV файл** с колонками:
-   ```
-   card_id, issue_date, first_transaction_date,
-   transaction_date, channel, mcc_category,
-   is_cash_withdrawal, is_transfer_only, active_day30
-   ```
-
-2. **Поместите файл в папку `data/`:**
-   ```bash
-   cp your_data.csv data/your_data.csv
-   ```
-
-3. **Запустите анализ:**
-   ```bash
-   python analysis.py --data-path data/your_data.csv
-   ```
-
-4. **Сгенерируется отчёт:**
-   ```
-   results/diagnostics_your_data.html
-   results/model_rules_your_data.json
-   ```
-
-## 📊 Выходные данные
-
-### 1. Диагностика (`analysis.py`)
-- Распределение активности по дням
-- Риск оттока по сегментам
-- Корреляция канала и категорий с удержанием
-
-### 2. Модель (`model.py`)
-- Обученная Decision Tree
-- Метрики: Precision, Recall, AUC-ROC
-- Правила в JSON формате
-
-### 3. Бонусная логика (`bonus_logic.py`)
-- Список клиентов для отправки бонусов
-- Персонализированные предложения
-- Примеры сообщений
-
-### 4. A/B-тест (`ab_test_design.py`)
-- Размер выборки для статистической значимости
-- Ожидаемый прирост транзакций
-- График мощности теста
-
-### 5. Экономика (`economics.py`)
-- ROI расчёты
-- Окупаемость инвестиций
-- Чувствительный анализ
-
-## 🎓 Как интерпретировать результаты
-
-### Пример вывода модели
-```json
-{
-  "card_id": "123456",
-  "risk_score": 0.78,
-  "risk_level": "HIGH",
-  "trigger_date": "2026-05-02",
-  "recommended_bonus": {
-    "category": "Restaurant",
-    "message": "Кэшбэк 5% в ресторанах — платите картой!",
-    "value_sums": 200
-  }
-}
+```
+card_id, kiosk_name, card_creation_date, month,
+category, cnt, amt, is_active
 ```
 
-**Что это значит:**
-- 📊 Риск оттока: **78%** — очень высокий
-- ⏰ Отправить бонус: **до 2 июня**
-- 🎁 Предложить: **Кэшбэк в ресторанах**
-- 💵 Стоимость: **200 сум**
+## Output
 
-## 📈 План раката на 90 дней
+### `analysis.py`
+- Activation and churn by month of card life
+- Category entry vs. maturity patterns
+- Region-level activity correlation
+- Behavioral segments with is_active=1 rates
 
-### Месяц 1: Тестирование
-- ✅ Подготовка датасета
-- ✅ Обучение модели
-- ✅ A/B-тест на 2000 клиентов
+### `model.py`
+- Trained Decision Tree
+- Metrics: Precision, Recall, AUC-ROC
+- Rules exported to JSON
 
-### Месяц 2: Оптимизация
-- ✅ Анализ результатов теста
-- ✅ Уточнение правил
-- ✅ Запуск на 10% базы
+### `bonus_logic.py`
+- List of cards to target
+- Personalized bonus offers
 
-### Месяц 3: Масштабирование
-- ✅ Полный раккат для HIGH RISK
-- ✅ Интеграция в push-систему
-- ✅ Мониторинг KPI
+## Key Findings (from EDA)
 
-## ❓ FAQ
-
-**Q: Нужны ли мне суммы транзакций?**  
-A: Нет! Модель работает только на частотах и временных признаках.
-
-**Q: Как долго обучать модель?**  
-A: ~2-3 недели истории достаточно для хороших правил.
-
-**Q: Какой минимум данных нужен?**  
-A: 1000+ карт с информацией об активности за месяц.
-
-**Q: Можно ли использовать для других банков?**  
-A: Да! Код универсален, нужно только подогнать названия категорий.
-
-## 📞 Контакты
-
-Если у вас есть вопросы по реализации — смотрите:
-- 📖 `MODEL_EXPLANATION.md` — детали модели
-- 💰 `ECONOMICS.md` — расчёты
-- 🧪 `AB_TEST_PLAN.md` — статистика
-
----
-
-**Готово к запуску! 🚀**
+- **61.6%** of cards made at least one transaction
+- **41%** of churned cards went dormant in month 0 (issuance month)
+- Cards using **3+ categories** have **100% is_active=1** rate
+- Entry categories: Online payments (60%), Domestic transfers (51%)
+- Top regions by transactional activity: REGION-001, REGION-069, REGION-047
