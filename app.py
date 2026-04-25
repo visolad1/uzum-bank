@@ -161,20 +161,36 @@ if page == "Обзор":
     st.title("Аналитика оттока карт")
     st.caption("Дашборд по предсказанию 'засыпания' дебетовых карт · Uzum Bank")
 
-    total_cards = diag['total_cards']          if diag else 0
+    # Keep top metrics consistent with sidebar: both must use scoring universe.
+    if scored is not None:
+        total_cards = len(scored)
+        at_risk = int(scored[COL_PREDICT].sum())
+        at_risk_pct = (100 * at_risk / total_cards) if total_cards else 0
+    else:
+        total_cards = diag['total_cards'] if diag else 0
+        at_risk = diag['churned_cards'] if diag else 0
+        at_risk_pct = (100 * at_risk / total_cards) if total_cards else 0
+
+    # Historical activity snapshot from diagnostics (full data universe).
     ever        = diag['ever_txn_cards']       if diag else 0
     rate        = diag['ever_txn_rate_pct']    if diag else 0
     active_n    = int(diag['total_cards'] * diag['is_active_target_pct'] / 100) if diag else 0
     pct         = diag['is_active_target_pct'] if diag else 0
-    churned     = diag['churned_cards']        if diag else 0
+    historical_dormant = diag['churned_cards'] if diag else 0
     auc         = metrics['auc_roc']           if metrics else 0
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1: st.metric("Карт всего",      f"{total_cards:,}")
     with k2: st.metric("Платили хоть раз", f"{ever:,}", delta=f"{rate:.1f}%")
     with k3: st.metric("Активных карт",   f"{active_n:,}", delta=f"{pct:.1f}%")
-    with k4: st.metric("Засыпающих",      f"{churned:,}")
+    with k4: st.metric("Под риском (модель)", f"{at_risk:,}", delta=f"{at_risk_pct:.1f}%")
     with k5: st.metric("AUC-ROC",         f"{auc:.3f}")
+
+    if diag:
+        st.caption(
+            f"Исторически засыпали (EDA, полный срез данных): {historical_dormant:,} карт. "
+            f"Под риском (модель, скоринг): {at_risk:,} карт."
+        )
 
     st.divider()
     col_left, col_right = st.columns(2)
